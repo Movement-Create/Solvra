@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{AC836191-5DCE-4567-AC44-33BF14D6966D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Solvra", "src\Solvra\Solvra.csproj", "{0592AD09-0D92-42AC-9978-9CD0D0284552}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{D0A7EE3C-A136-46AE-B773-63701DAD2443}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Solvra.Tests", "tests\Solvra.Tests\Solvra.Tests.csproj", "{18F5CA62-FBA5-41A9-B0F5-399C11ABC817}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0592AD09-0D92-42AC-9978-9CD0D0284552}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0592AD09-0D92-42AC-9978-9CD0D0284552}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0592AD09-0D92-42AC-9978-9CD0D0284552}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0592AD09-0D92-42AC-9978-9CD0D0284552}.Release|Any CPU.Build.0 = Release|Any CPU
+		{18F5CA62-FBA5-41A9-B0F5-399C11ABC817}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{18F5CA62-FBA5-41A9-B0F5-399C11ABC817}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{18F5CA62-FBA5-41A9-B0F5-399C11ABC817}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{18F5CA62-FBA5-41A9-B0F5-399C11ABC817}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{0592AD09-0D92-42AC-9978-9CD0D0284552} = {AC836191-5DCE-4567-AC44-33BF14D6966D}
+		{18F5CA62-FBA5-41A9-B0F5-399C11ABC817} = {D0A7EE3C-A136-46AE-B773-63701DAD2443}
+	EndGlobalSection
+EndGlobal
