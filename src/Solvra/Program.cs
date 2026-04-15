@@ -7,6 +7,7 @@ using Solvra.Memory;
 using Solvra.Models;
 using Solvra.Observability;
 using Solvra.Providers;
+using Solvra.Scheduler;
 using Solvra.Security;
 using Solvra.Skills;
 using Solvra.Tools;
@@ -98,6 +99,12 @@ public static class Program
                 }, agentCt);
                 return subResult.Text ?? "";
             };
+
+            // SB10: Headless permission warning
+            if (!auto && Console.IsInputRedirected)
+            {
+                Console.Error.WriteLine("[Warning] Headless mode with default permissions. Execute/Agent tools will be denied. Use --auto for headless operation.");
+            }
 
             var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
             var reflection = new Reflection(agentLoop);
@@ -310,9 +317,70 @@ public static class Program
         serveCommand.SetHandler(async (context) =>
         {
             var port = context.ParseResult.GetValueForOption(portOption);
-            Console.WriteLine($"Solvra serve is a placeholder. Port: {port}");
-            Console.WriteLine("Webhook and cron server not yet implemented.");
-            await Task.Delay(Timeout.Infinite, context.GetCancellationToken());
+            var noCron = context.ParseResult.GetValueForOption(noCronOption);
+            var noWebhook = context.ParseResult.GetValueForOption(noWebhookOption);
+            var ct = context.GetCancellationToken();
+
+            var config = await ConfigLoader.LoadAsync();
+            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
+                BuildSubsystems(config);
+
+            // Build an agent-runner delegate for webhook/cron to invoke
+            Func<string, string, CancellationToken, Task<(string Text, int Turns)>> runAgent = async (prompt, title, innerCt) =>
+            {
+                var loop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
+                var session = new SessionConfig
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    CreatedAt = DateTime.UtcNow.ToString("o"),
+                    Model = config.Model,
+                    Provider = config.Provider,
+                    PermissionMode = "auto",
+                    MaxTurns = config.MaxTurns,
+                    MaxBudgetUsd = config.MaxBudgetUsd,
+                    Title = title
+                };
+                var result = await loop.RunAsync(new AgentRunOptions
+                {
+                    Prompt = prompt,
+                    Session = session,
+                    Streaming = false
+                }, innerCt);
+                return (result.Text ?? "", result.Turns);
+            };
+
+            var tasks = new List<Task>();
+
+            if (!noWebhook)
+            {
+                var webhookServer = new WebhookServer(port, config.WebhookSecret);
+                webhookServer.RunAgentDelegate = runAgent;
+                webhookServer.Start();
+                Console.WriteLine($"  Webhook: POST http://localhost:{port}/trigger");
+            }
+
+            var cronScheduler = new CronScheduler();
+            if (!noCron)
+            {
+                cronScheduler.RunAgentDelegate = async (prompt, title, innerCt) =>
+                {
+                    var (text, _) = await runAgent(prompt, title, innerCt);
+                    return text;
+                };
+
+                foreach (var job in config.Cron)
+                    cronScheduler.AddJob(job);
+
+                Console.WriteLine($"  Cron jobs: {config.Cron.Count} configured");
+                tasks.Add(cronScheduler.StartAsync(ct));
+            }
+
+            Console.WriteLine($"Solvra server listening on port {port}");
+
+            if (tasks.Count > 0)
+                await Task.WhenAll(tasks);
+            else
+                await Task.Delay(Timeout.Infinite, ct);
         });
 
         // --- solvra memory prune ---
@@ -320,9 +388,57 @@ public static class Program
         var pruneCommand = new Command("prune", "Prune stale lessons");
         pruneCommand.SetHandler(async () =>
         {
-            Console.WriteLine("Memory prune: not yet implemented.");
+            var config = await ConfigLoader.LoadAsync();
+            var mm = new MemoryManager(config.MemoryDir);
+            var lessons = await mm.ParseLessonsAsync();
+            var cutoff = DateTime.UtcNow.AddDays(-30).ToString("yyyy-MM-dd");
+            var oldLessons = lessons.Where(l => string.Compare(l.Date, cutoff, StringComparison.Ordinal) < 0).ToList();
+
+            if (oldLessons.Count == 0)
+            {
+                Console.WriteLine("No lessons older than 30 days found.");
+                return;
+            }
+
+            Console.WriteLine($"Found {oldLessons.Count} lessons older than 30 days.");
+            Console.Write("Prune them? [y/N] ");
+            var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
+            if (answer != "y" && answer != "yes") { Console.WriteLine("Cancelled."); return; }
+
+            var remaining = lessons.Except(oldLessons).ToList();
+            await mm.WriteLessonsAsync(remaining);
+            Console.WriteLine($"Pruned {oldLessons.Count} lessons. {remaining.Count} remaining.");
         });
         memoryCommand.AddCommand(pruneCommand);
+
+        // --- solvra memory add <content> ---
+        var memoryAddCmd = new Command("add", "Add a fact to memory");
+        var memoryAddArg = new Argument<string>("content", "The fact to remember");
+        memoryAddCmd.AddArgument(memoryAddArg);
+        memoryAddCmd.SetHandler(async (string content) =>
+        {
+            var config = await ConfigLoader.LoadAsync();
+            var mm = new MemoryManager(config.MemoryDir);
+            await mm.AppendFactAsync(content);
+            Console.WriteLine("Fact added to memory.");
+        }, memoryAddArg);
+        memoryCommand.AddCommand(memoryAddCmd);
+
+        // --- solvra memory search <query> ---
+        var memorySearchCmd = new Command("search", "Search memory");
+        var memorySearchArg = new Argument<string>("query", "Search query");
+        memorySearchCmd.AddArgument(memorySearchArg);
+        memorySearchCmd.SetHandler(async (string query) =>
+        {
+            var config = await ConfigLoader.LoadAsync();
+            var mm = new MemoryManager(config.MemoryDir);
+            var results = await mm.SearchAsync(query);
+            if (string.IsNullOrWhiteSpace(results))
+                Console.WriteLine("No results found.");
+            else
+                Console.WriteLine(results);
+        }, memorySearchArg);
+        memoryCommand.AddCommand(memorySearchCmd);
 
         // --- solvra session list / show ---
         var sessionCommand = new Command("session", "Session management");
@@ -370,8 +486,73 @@ public static class Program
             }
         }, sessionShowArg);
 
+        // --- solvra session resume <id> ---
+        var sessionResumeArg = new Argument<string>("id", "Session ID to resume");
+        var sessionResumeCmd = new Command("resume", "Resume a previous session") { sessionResumeArg };
+        sessionResumeCmd.SetHandler(async (string id) =>
+        {
+            var config = await ConfigLoader.LoadAsync();
+            var sm = new SessionManager(config.SessionsDir);
+            try
+            {
+                var info = await sm.ResumeAsync(id);
+                Console.WriteLine($"Resumed session {id} with {info.Messages.Count} messages.");
+            }
+            catch (FileNotFoundException)
+            {
+                Console.WriteLine($"Session {id} not found.");
+            }
+        }, sessionResumeArg);
+
+        // --- solvra session delete <id> ---
+        var sessionDeleteArg = new Argument<string>("id", "Session ID to delete");
+        var sessionDeleteCmd = new Command("delete", "Delete a session") { sessionDeleteArg };
+        sessionDeleteCmd.SetHandler(async (string id) =>
+        {
+            var config = await ConfigLoader.LoadAsync();
+            var sm = new SessionManager(config.SessionsDir);
+            var filePath = Path.Combine(config.SessionsDir, $"{id}.jsonl");
+            if (File.Exists(filePath))
+            {
+                await sm.DeleteAsync(id);
+                Console.WriteLine($"Session {id} deleted.");
+            }
+            else
+            {
+                Console.WriteLine($"Session {id} not found.");
+            }
+        }, sessionDeleteArg);
+
         sessionCommand.AddCommand(sessionListCommand);
         sessionCommand.AddCommand(sessionShowCommand);
+        sessionCommand.AddCommand(sessionResumeCmd);
+        sessionCommand.AddCommand(sessionDeleteCmd);
+
+        // --- solvra tools ---
+        var toolsCmd = new Command("tools", "List all available tools");
+        toolsCmd.SetHandler(() =>
+        {
+            var sandbox = new SandboxManager(new SandboxConfig());
+            var registry = new ToolRegistry();
+            registry.RegisterBuiltins(sandbox);
+            var defs = registry.GetToolDefinitions();
+            Console.WriteLine($"Available tools ({defs.Count}):\n");
+            foreach (var d in defs)
+                Console.WriteLine($"  {d.Name,-25} {d.Description}");
+        });
+
+        // --- solvra skills ---
+        var skillsCmd = new Command("skills", "List discovered skills");
+        skillsCmd.SetHandler(async () =>
+        {
+            var config = await ConfigLoader.LoadAsync();
+            var loader = new SkillLoader(config.SkillsDir);
+            var skills = await loader.GetAllSkillsAsync();
+            Console.WriteLine($"Discovered skills ({skills.Count}):\n");
+            foreach (var s in skills)
+                Console.WriteLine($"  {s.Name,-25} {s.Description}");
+            if (skills.Count == 0) Console.WriteLine("No skills found in skills/ directory.");
+        });
 
         rootCommand.AddCommand(runCommand);
         rootCommand.AddCommand(chatCommand);
@@ -379,6 +560,8 @@ public static class Program
         rootCommand.AddCommand(serveCommand);
         rootCommand.AddCommand(memoryCommand);
         rootCommand.AddCommand(sessionCommand);
+        rootCommand.AddCommand(toolsCmd);
+        rootCommand.AddCommand(skillsCmd);
 
         return await rootCommand.InvokeAsync(args);
     }

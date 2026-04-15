@@ -45,6 +45,9 @@ public sealed class AgentLoop
         _costTracker = costTracker ?? new CostTracker();
         _sessionManager = sessionManager ?? new SessionManager();
         _tracer = tracer ?? new Tracer("AgentLoop");
+
+        // P5: Wire Printer to tracer span events for observability output
+        _tracer.OnSpanEvent += Printer.HandleSpanEvent;
     }
 
     public async Task<AgentRunResult> RunAsync(AgentRunOptions options, CancellationToken ct = default)
@@ -104,6 +107,14 @@ public sealed class AgentLoop
         var totalUsage = new TokenUsage();
         var lastText = "";
 
+        // P2: Root span wrapping the entire agent session
+        using var sessionSpan = _tracer.StartSpan("agent.session", new Dictionary<string, object>
+        {
+            ["session_id"] = sessionId,
+            ["model"] = resolvedModel,
+            ["provider"] = provider.Id
+        });
+
         // --- THE LOOP ---
         while (turns < options.Session.MaxTurns)
         {
@@ -117,28 +128,68 @@ public sealed class AgentLoop
             // Compress context if needed
             var compressedMessages = Context.CompressContext(messages, resolvedModel, options.Session.Provider);
 
-            // Call LLM with retry
-            var response = await Retry.WithRetryAsync(
-                async () => await provider.CompleteAsync(new CompletionOptions
+            // P3: Wrap LLM call in llm.call span
+            var completionOptions = new CompletionOptions
+            {
+                Model = resolvedModel,
+                Messages = compressedMessages,
+                System = systemPrompt,
+                Tools = tools.Count > 0 ? tools : null,
+                MaxTokens = 8192,
+                Stream = options.Streaming
+            };
+
+            LlmResponse response;
+            using (var llmSpan = _tracer.StartSpan("llm.call", new Dictionary<string, object>
+            {
+                ["model"] = resolvedModel,
+                ["input_tokens"] = Context.EstimateContextTokens(compressedMessages)
+            }))
+            {
+                // P4: Use streaming when enabled and no tools registered
+                if (options.Streaming && tools.Count == 0)
                 {
-                    Model = resolvedModel,
-                    Messages = compressedMessages,
-                    System = systemPrompt,
-                    Tools = tools.Count > 0 ? tools : null,
-                    MaxTokens = 8192,
-                    Stream = options.Streaming
-                }, ct),
-                new RetryOptions
-                {
-                    MaxRetries = 3,
-                    OnRetry = async (attempt, ex) =>
+                    var text = new System.Text.StringBuilder();
+                    await foreach (var chunk in provider.StreamAsync(completionOptions, ct))
                     {
-                        options.OnText?.Invoke($"\n[Retry {attempt + 1}: {ex.Message}]\n");
-                        return true;
+                        text.Append(chunk);
+                        options.OnText?.Invoke(chunk);
                     }
-                },
-                ct
-            );
+                    response = new LlmResponse
+                    {
+                        Text = text.ToString(),
+                        ToolCalls = Array.Empty<ToolCall>(),
+                        StopReason = "end_turn",
+                        Usage = new TokenUsage
+                        {
+                            InputTokens = Context.EstimateContextTokens(compressedMessages),
+                            OutputTokens = Context.EstimateTokens(text.ToString())
+                        }
+                    };
+                }
+                else
+                {
+                    response = await Retry.WithRetryAsync(
+                        async () => await provider.CompleteAsync(completionOptions, ct),
+                        new RetryOptions
+                        {
+                            MaxRetries = 3,
+                            OnRetry = async (attempt, ex) =>
+                            {
+                                options.OnText?.Invoke($"\n[Retry {attempt + 1}: {ex.Message}]\n");
+                                return true;
+                            }
+                        },
+                        ct
+                    );
+                }
+
+                _tracer.AddEvent("llm.response", new Dictionary<string, object>
+                {
+                    ["output_tokens"] = response.Usage.OutputTokens,
+                    ["stop_reason"] = response.StopReason
+                });
+            }
 
             totalUsage += response.Usage;
 
@@ -249,6 +300,9 @@ public sealed class AgentLoop
                         options.Session.AllowedTools.ToList(),
                         options.Session.DisallowedTools.ToList()));
 
+                // P1: Log tool call to session JSONL
+                await _sessionManager.AppendToolCallAsync(options.Session, tc.Name, effectiveInput, tc.Id);
+
                 // Execute tool
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 ToolExecuteResult result;
@@ -258,6 +312,9 @@ public sealed class AgentLoop
                     sw.Stop();
                     _tracer.AddEvent("tool.result", new Dictionary<string, object> { ["tool"] = tc.Name, ["is_error"] = result.IsError, ["duration_ms"] = sw.ElapsedMilliseconds });
                 }
+
+                // P1: Log tool result to session JSONL
+                await _sessionManager.AppendToolResultAsync(options.Session, tc.Id, result.Output, result.IsError);
 
                 var toolResult = new ToolResult
                 {

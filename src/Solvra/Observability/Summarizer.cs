@@ -102,8 +102,71 @@ public static class Summarizer
             }
         }
 
-        // Final output from session_end
+        // P6: Tool usage aggregation
+        var toolCallEvents = events.Where(e => e.Type == "tool_call").ToList();
+        var toolResultEvents = events.Where(e => e.Type == "tool_result").ToList();
+
+        if (toolCallEvents.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Tool Usage");
+            sb.AppendLine("| Tool | Calls | Errors |");
+            sb.AppendLine("|------|-------|--------|");
+
+            var toolGroups = toolCallEvents
+                .GroupBy(e => e.Data.TryGetProperty("tool_name", out var tn) ? tn.GetString() ?? "unknown" : "unknown");
+
+            foreach (var group in toolGroups)
+            {
+                var callIds = group
+                    .Select(e => e.Data.TryGetProperty("call_id", out var ci) ? ci.GetString() ?? "" : "")
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .ToHashSet();
+
+                var errorCount = toolResultEvents.Count(e =>
+                {
+                    var matchId = e.Data.TryGetProperty("call_id", out var ci) ? ci.GetString() ?? "" : "";
+                    var isErr = e.Data.TryGetProperty("is_error", out var ie) && ie.GetBoolean();
+                    return callIds.Contains(matchId) && isErr;
+                });
+
+                sb.AppendLine($"| {group.Key} | {group.Count()} | {errorCount} |");
+            }
+        }
+
+        // P6: LLM token totals from session_end usage
         var endEvent = events.LastOrDefault(e => e.Type == "session_end");
+        if (endEvent != null && endEvent.Data.ValueKind == JsonValueKind.Object)
+        {
+            if (endEvent.Data.TryGetProperty("usage", out var usage))
+            {
+                sb.AppendLine();
+                sb.AppendLine("## LLM Usage");
+                if (usage.TryGetProperty("input", out var inp))
+                    sb.AppendLine($"- **Input Tokens:** {inp.GetInt32():N0}");
+                if (usage.TryGetProperty("output", out var outp))
+                    sb.AppendLine($"- **Output Tokens:** {outp.GetInt32():N0}");
+            }
+        }
+
+        // P6: Error details
+        var errorResults = toolResultEvents
+            .Where(e => e.Data.TryGetProperty("is_error", out var ie) && ie.GetBoolean())
+            .ToList();
+
+        if (errorResults.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Errors");
+            foreach (var err in errorResults)
+            {
+                var callId = err.Data.TryGetProperty("call_id", out var ci) ? ci.GetString() ?? "" : "";
+                var output = err.Data.TryGetProperty("output", out var o) ? o.GetString() ?? "" : "";
+                sb.AppendLine($"- `{callId}`: {Truncate(output, 200)}");
+            }
+        }
+
+        // Final output from session_end
         if (endEvent != null && endEvent.Data.ValueKind == JsonValueKind.Object)
         {
             sb.AppendLine();

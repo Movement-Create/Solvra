@@ -115,6 +115,7 @@ public class MemoryManager
     /// <summary>
     /// Fix 5c: Log a conversation to the daily log file.
     /// Fix 5d: Uses memory/YYYY-MM-DD.md not memory/daily/YYYY-MM-DD.md.
+    /// P7: Also rebuilds keyword index after logging.
     /// </summary>
     public async Task LogConversationAsync(string prompt, string response, string sessionId)
     {
@@ -125,6 +126,23 @@ public class MemoryManager
         var responseSnippet = response.Length > 200 ? response[..200] : response;
         var snippet = $"## {DateTime.UtcNow:HH:mm} \u2014 Session {sessionId}\n**User:** {promptSnippet}\n**Agent:** {responseSnippet}\n\n";
         await File.AppendAllTextAsync(logPath, snippet);
+
+        // P7: Rebuild index after logging
+        await RebuildIndexAsync();
+    }
+
+    /// <summary>
+    /// P7: Extract facts from text using simple heuristic.
+    /// Lines starting with "- " or "* " are treated as facts.
+    /// </summary>
+    public Task<List<string>> ExtractFactsAsync(string text)
+    {
+        var facts = text.Split('\n')
+            .Where(l => l.TrimStart().StartsWith("- ") || l.TrimStart().StartsWith("* "))
+            .Select(l => l.TrimStart().TrimStart('-', '*').Trim())
+            .Where(l => l.Length > 10)
+            .ToList();
+        return Task.FromResult(facts);
     }
 
     /// <summary>

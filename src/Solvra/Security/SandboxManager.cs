@@ -19,7 +19,7 @@ public record SandboxConfig(
     public static readonly string[] DefaultEnvAllowlist =
     [
         "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM",
-        "NODE_ENV", "NPM_CONFIG_PREFIX", "NVM_DIR"
+        "NODE_ENV", "NPM_CONFIG_PREFIX", "NVM_DIR", "TZ"
     ];
 
     public string EffectiveRootDir => RootDir ?? Directory.GetCurrentDirectory();

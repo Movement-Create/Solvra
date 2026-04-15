@@ -45,6 +45,105 @@ public class WebSearchTool : ToolBase
         if (context.PlanMode)
             return new ToolExecuteResult($"Would search for: {query}", false);
 
+        // P9: Brave Search API fallback
+        var braveKey = Environment.GetEnvironmentVariable("BRAVE_API_KEY");
+        if (!string.IsNullOrEmpty(braveKey))
+            return await SearchBraveAsync(query, count, braveKey, ct);
+
+        // P9: SerpAPI fallback
+        var serpKey = Environment.GetEnvironmentVariable("SERPAPI_KEY");
+        if (!string.IsNullOrEmpty(serpKey))
+            return await SearchSerpApiAsync(query, count, serpKey, ct);
+
+        // Fallback to DuckDuckGo
+        return await SearchDdgAsync(query, count, ct);
+    }
+
+    private static async Task<ToolExecuteResult> SearchBraveAsync(string query, int count, string apiKey, CancellationToken ct)
+    {
+        try
+        {
+            var encoded = WebUtility.UrlEncode(query);
+            var url = $"https://api.search.brave.com/res/v1/web/search?q={encoded}&count={count}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("X-Subscription-Token", apiKey);
+            request.Headers.Add("Accept", "application/json");
+
+            var response = await HttpClient.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+
+            var doc = JsonDocument.Parse(json);
+            var results = new List<SearchResult>();
+
+            if (doc.RootElement.TryGetProperty("web", out var web) &&
+                web.TryGetProperty("results", out var webResults))
+            {
+                foreach (var item in webResults.EnumerateArray())
+                {
+                    if (results.Count >= count) break;
+                    var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+                    var itemUrl = item.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                    var snippet = item.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
+                    if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(itemUrl))
+                        results.Add(new SearchResult(title, itemUrl, snippet));
+                }
+            }
+
+            if (results.Count == 0)
+                return new ToolExecuteResult("No results found.", false);
+
+            var output = string.Join("\n\n", results.Select((r, i) =>
+                $"{i + 1}. {r.Title}\n   {r.Url}\n   {r.Snippet}"));
+
+            return new ToolExecuteResult(output, false);
+        }
+        catch (Exception ex)
+        {
+            return new ToolExecuteResult($"Brave search error: {ex.Message}", true);
+        }
+    }
+
+    private static async Task<ToolExecuteResult> SearchSerpApiAsync(string query, int count, string apiKey, CancellationToken ct)
+    {
+        try
+        {
+            var encoded = WebUtility.UrlEncode(query);
+            var url = $"https://serpapi.com/search.json?q={encoded}&num={count}&api_key={apiKey}";
+
+            var json = await HttpClient.GetStringAsync(url, ct);
+            var doc = JsonDocument.Parse(json);
+            var results = new List<SearchResult>();
+
+            if (doc.RootElement.TryGetProperty("organic_results", out var organic))
+            {
+                foreach (var item in organic.EnumerateArray())
+                {
+                    if (results.Count >= count) break;
+                    var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+                    var itemUrl = item.TryGetProperty("link", out var u) ? u.GetString() ?? "" : "";
+                    var snippet = item.TryGetProperty("snippet", out var s) ? s.GetString() ?? "" : "";
+                    if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(itemUrl))
+                        results.Add(new SearchResult(title, itemUrl, snippet));
+                }
+            }
+
+            if (results.Count == 0)
+                return new ToolExecuteResult("No results found.", false);
+
+            var output = string.Join("\n\n", results.Select((r, i) =>
+                $"{i + 1}. {r.Title}\n   {r.Url}\n   {r.Snippet}"));
+
+            return new ToolExecuteResult(output, false);
+        }
+        catch (Exception ex)
+        {
+            return new ToolExecuteResult($"SerpAPI search error: {ex.Message}", true);
+        }
+    }
+
+    private static async Task<ToolExecuteResult> SearchDdgAsync(string query, int count, CancellationToken ct)
+    {
         try
         {
             var encoded = WebUtility.UrlEncode(query);
