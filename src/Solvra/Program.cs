@@ -489,20 +489,86 @@ public static class Program
         // --- solvra session resume <id> ---
         var sessionResumeArg = new Argument<string>("id", "Session ID to resume");
         var sessionResumeCmd = new Command("resume", "Resume a previous session") { sessionResumeArg };
-        sessionResumeCmd.SetHandler(async (string id) =>
+        sessionResumeCmd.AddOption(autoOption);
+        sessionResumeCmd.SetHandler(async (context) =>
         {
+            var id = context.ParseResult.GetValueForArgument(sessionResumeArg);
+            var auto = context.ParseResult.GetValueForOption(autoOption);
+            var ct = context.GetCancellationToken();
+
             var config = await ConfigLoader.LoadAsync();
             var sm = new SessionManager(config.SessionsDir);
             try
             {
                 var info = await sm.ResumeAsync(id);
                 Console.WriteLine($"Resumed session {id} with {info.Messages.Count} messages.");
+
+                // SB7: Drop into interactive chat REPL with the resumed session
+                var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
+                    BuildSubsystems(config);
+
+                var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
+                var reflection = new Reflection(agentLoop);
+                var sessionConfig = info.Config;
+                var history = new List<Message>(info.Messages);
+
+                Console.WriteLine($"Solvra Chat ({sessionConfig.Model}) — type /exit to quit");
+
+                while (!ct.IsCancellationRequested)
+                {
+                    Console.Write("\nyou> ");
+                    var input = Console.ReadLine();
+                    if (input == null) break;
+                    input = input.Trim();
+
+                    switch (input.ToLowerInvariant())
+                    {
+                        case "/exit" or "/quit" or "/q":
+                            Console.WriteLine("Goodbye!");
+                            return;
+                        case "/help":
+                            Console.WriteLine("Commands: /exit, /quit, /q, /help, /session, /tools");
+                            continue;
+                        case "/session":
+                            Console.WriteLine($"Session: {sessionConfig.Id}");
+                            Console.WriteLine($"Model: {sessionConfig.Model}");
+                            Console.WriteLine($"Turns: {history.Count(m => m.Role == MessageRole.User)}");
+                            continue;
+                        case "/tools":
+                            foreach (var tool in registry.GetToolDefinitions())
+                                Console.WriteLine($"  {tool.Name}: {tool.Description}");
+                            continue;
+                        case "":
+                            continue;
+                    }
+
+                    var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
+                    {
+                        Prompt = input,
+                        Session = sessionConfig,
+                        History = history,
+                        Streaming = true,
+                        OnText = text => Console.Write(text),
+                        OnPermissionRequest = auto ? null : async tc =>
+                        {
+                            Console.Write($"\nAllow tool '{tc.Name}'? (y/n): ");
+                            var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
+                            return answer is "y" or "yes";
+                        }
+                    }, ct);
+
+                    history = [..result.Messages];
+                    Console.WriteLine();
+
+                    await sm.LogUserMessageAsync(sessionConfig, input);
+                    await sm.LogAssistantMessageAsync(sessionConfig, result.Text);
+                }
             }
             catch (FileNotFoundException)
             {
                 Console.WriteLine($"Session {id} not found.");
             }
-        }, sessionResumeArg);
+        });
 
         // --- solvra session delete <id> ---
         var sessionDeleteArg = new Argument<string>("id", "Session ID to delete");
@@ -579,6 +645,9 @@ public static class Program
         var memoryManager = new MemoryManager(config.MemoryDir);
         var permissionChecker = new PermissionChecker();
         var tracer = new Tracer("Solvra");
+
+        // P5: Subscribe Printer once at process startup (not per AgentLoop instance)
+        tracer.OnSpanEvent += Printer.HandleSpanEvent;
 
         return (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer);
     }

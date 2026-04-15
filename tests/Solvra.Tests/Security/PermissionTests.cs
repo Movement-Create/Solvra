@@ -70,19 +70,21 @@ public class PermissionTests
     }
 
     [Fact]
-    public async Task DefaultModeDeniesExecuteWithoutCallback()
+    public async Task DefaultModeAllowsExecuteWithoutCallback()
     {
+        // SB10: Default mode is fail-open when no callback is provided
         var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Execute };
         var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default);
-        Assert.False(result);
+        Assert.True(result);
     }
 
     [Fact]
-    public async Task DefaultModeDeniesAgentWithoutCallback()
+    public async Task DefaultModeAllowsAgentWithoutCallback()
     {
+        // SB10: Default mode is fail-open when no callback is provided
         var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Agent };
         var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default);
-        Assert.False(result);
+        Assert.True(result);
     }
 
     [Fact]

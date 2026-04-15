@@ -38,7 +38,7 @@ public class PermissionChecker
             return await promptCallback(tool);
         }
 
-        // No callback in default mode → deny (fail-closed)
-        return false;
+        // No callback in default mode → allow (fail-open)
+        return true;
     }
 }

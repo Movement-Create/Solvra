@@ -51,7 +51,7 @@ public class WebSearchTool : ToolBase
             return await SearchBraveAsync(query, count, braveKey, ct);
 
         // P9: SerpAPI fallback
-        var serpKey = Environment.GetEnvironmentVariable("SERPAPI_KEY");
+        var serpKey = Environment.GetEnvironmentVariable("SERP_API_KEY");
         if (!string.IsNullOrEmpty(serpKey))
             return await SearchSerpApiAsync(query, count, serpKey, ct);
 

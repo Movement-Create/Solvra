@@ -45,9 +45,6 @@ public sealed class AgentLoop
         _costTracker = costTracker ?? new CostTracker();
         _sessionManager = sessionManager ?? new SessionManager();
         _tracer = tracer ?? new Tracer("AgentLoop");
-
-        // P5: Wire Printer to tracer span events for observability output
-        _tracer.OnSpanEvent += Printer.HandleSpanEvent;
     }
 
     public async Task<AgentRunResult> RunAsync(AgentRunOptions options, CancellationToken ct = default)
@@ -146,8 +143,8 @@ public sealed class AgentLoop
                 ["input_tokens"] = Context.EstimateContextTokens(compressedMessages)
             }))
             {
-                // P4: Use streaming when enabled and no tools registered
-                if (options.Streaming && tools.Count == 0)
+                // P4: Use streaming when enabled
+                if (options.Streaming)
                 {
                     var text = new System.Text.StringBuilder();
                     await foreach (var chunk in provider.StreamAsync(completionOptions, ct))
@@ -274,20 +271,6 @@ public sealed class AgentLoop
                     ? preHookResult.ModifiedInput.Value
                     : inputElement;
 
-                // Permission check
-                var permAllowed = await CheckToolPermission(tc.Name, permissionMode, options.OnPermissionRequest, tc);
-                if (!permAllowed)
-                {
-                    toolResults.Add(new ToolResultContent
-                    {
-                        ToolUseId = tc.Id,
-                        Name = tc.Name,
-                        Content = "Permission denied by user.",
-                        IsError = true
-                    });
-                    continue;
-                }
-
                 // Build execution context
                 var execContext = new ToolExecutionContext(
                     SessionId: sessionId,
@@ -308,7 +291,10 @@ public sealed class AgentLoop
                 ToolExecuteResult result;
                 using (var toolSpan = _tracer.StartSpan("tool.execute", new Dictionary<string, object> { ["tool"] = tc.Name, ["input_length"] = effectiveInput.GetRawText().Length }))
                 {
-                    result = await _toolRegistry.ExecuteToolAsync(tc.Name, effectiveInput, execContext, ct);
+                    Func<ITool, Task<bool>>? permCallback = options.OnPermissionRequest != null
+                        ? async _ => await options.OnPermissionRequest(tc)
+                        : null;
+                    result = await _toolRegistry.ExecuteToolAsync(tc.Name, effectiveInput, execContext, permissionMode, permCallback, ct);
                     sw.Stop();
                     _tracer.AddEvent("tool.result", new Dictionary<string, object> { ["tool"] = tc.Name, ["is_error"] = result.IsError, ["duration_ms"] = sw.ElapsedMilliseconds });
                 }
@@ -361,34 +347,6 @@ public sealed class AgentLoop
         await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, finalCost);
         await LogSessionEnd(sessionId, turns, finalCost, "MaxTurns");
         return BuildResult(lastText, turns, totalUsage, finalCost, StopReason.MaxTurns, messages);
-    }
-
-    private async Task<bool> CheckToolPermission(
-        string toolName,
-        PermissionMode mode,
-        Func<ToolCall, Task<bool>>? onPermissionRequest,
-        ToolCall tc)
-    {
-        if (mode == PermissionMode.Auto || mode == PermissionMode.BypassPermissions)
-            return true;
-
-        if (_toolRegistry is ToolRegistry registry)
-        {
-            var tool = registry.GetTool(toolName);
-            if (tool != null)
-            {
-                Func<ITool, Task<bool>>? callback = onPermissionRequest != null
-                    ? async (t) => await onPermissionRequest(tc)
-                    : null;
-                return await _permissionChecker.CheckPermissionAsync(tool, mode, callback);
-            }
-        }
-
-        // Fallback: if callback exists, ask user
-        if (onPermissionRequest != null)
-            return await onPermissionRequest(tc);
-
-        return mode == PermissionMode.Auto;
     }
 
     private async Task LogSessionEnd(string sessionId, int turns, decimal costUsd, string stopReason)
