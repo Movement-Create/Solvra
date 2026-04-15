@@ -1,0 +1,195 @@
+{
+  "name": "solvra-vscode",
+  "displayName": "Solvra",
+  "description": "AI agent orchestrator for VS Code — chat, run prompts, explain and fix code (C#/.NET backend)",
+  "version": "0.1.0",
+  "publisher": "solvra",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/movement-create/solvra"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "solvra-sidebar",
+          "title": "Solvra",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "solvra-sidebar": [
+        {
+          "type": "tree",
+          "id": "solvra.sessionsView",
+          "name": "Sessions",
+          "icon": "resources/icon.svg",
+          "contextualTitle": "Solvra Sessions"
+        },
+        {
+          "type": "webview",
+          "id": "solvra.chatView",
+          "name": "Chat",
+          "icon": "resources/icon.svg",
+          "contextualTitle": "Solvra"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "solvra.openChat", "title": "Open Chat", "category": "Solvra", "icon": "$(comment-discussion)" },
+      { "command": "solvra.runPrompt", "title": "Run Prompt", "category": "Solvra", "icon": "$(play)" },
+      { "command": "solvra.runOnSelection", "title": "Run on Selection", "category": "Solvra" },
+      { "command": "solvra.explainSelection", "title": "Explain Selection", "category": "Solvra" },
+      { "command": "solvra.fixSelection", "title": "Fix Selection", "category": "Solvra" },
+      { "command": "solvra.listTools", "title": "List Tools", "category": "Solvra" },
+      { "command": "solvra.listSessions", "title": "List Sessions", "category": "Solvra" },
+      { "command": "solvra.addMemory", "title": "Add Memory", "category": "Solvra" },
+      { "command": "solvra.searchMemory", "title": "Search Memory", "category": "Solvra" },
+      { "command": "solvra.explainInChat", "title": "Solvra: Explain", "category": "Solvra" },
+      { "command": "solvra.fixInChat", "title": "Solvra: Fix", "category": "Solvra" },
+      { "command": "solvra.askSolvra", "title": "Solvra: Ask Solvra", "category": "Solvra" },
+      { "command": "solvra.newSession", "title": "New Session", "category": "Solvra", "icon": "$(add)" },
+      { "command": "solvra.refreshSessions", "title": "Refresh Sessions", "category": "Solvra", "icon": "$(refresh)" },
+      { "command": "solvra.openSession", "title": "Open Session", "category": "Solvra" },
+      { "command": "solvra.renameSession", "title": "Rename", "category": "Solvra", "icon": "$(edit)" },
+      { "command": "solvra.deleteSession", "title": "Delete", "category": "Solvra", "icon": "$(trash)" },
+      { "command": "solvra.toggleShowAllSessions", "title": "Toggle Show All Sessions", "category": "Solvra" },
+      { "command": "solvra.focusInput", "title": "Focus Chat Input", "category": "Solvra" },
+      { "command": "solvra.toggleThinking", "title": "Toggle Thinking Blocks", "category": "Solvra" },
+      { "command": "solvra.clearSession", "title": "Clear Current Session", "category": "Solvra" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "solvra.newSession", "when": "view == solvra.sessionsView", "group": "navigation@1" },
+        { "command": "solvra.refreshSessions", "when": "view == solvra.sessionsView", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "solvra.renameSession", "when": "view == solvra.sessionsView && viewItem == solvraSession", "group": "inline@1" },
+        { "command": "solvra.deleteSession", "when": "view == solvra.sessionsView && viewItem == solvraSession", "group": "inline@2" }
+      ],
+      "editor/context": [
+        { "command": "solvra.explainInChat", "when": "editorHasSelection", "group": "solvra@1" },
+        { "command": "solvra.fixInChat", "when": "editorHasSelection", "group": "solvra@2" },
+        { "command": "solvra.askSolvra", "when": "editorHasSelection", "group": "solvra@3" }
+      ]
+    },
+    "keybindings": [
+      { "command": "solvra.openChat", "key": "ctrl+shift+a", "mac": "cmd+shift+a" },
+      { "command": "solvra.runPrompt", "key": "ctrl+shift+r", "mac": "cmd+shift+r" },
+      { "command": "solvra.newSession", "key": "ctrl+shift+n", "mac": "cmd+shift+n", "when": "focusedView == solvra.chatView || focusedView == solvra.sessionsView" },
+      { "command": "solvra.focusInput", "key": "ctrl+l", "mac": "cmd+l", "when": "focusedView == solvra.chatView" },
+      { "command": "solvra.toggleThinking", "key": "ctrl+shift+t", "mac": "cmd+shift+t", "when": "focusedView == solvra.chatView" },
+      { "command": "solvra.clearSession", "key": "ctrl+shift+k", "mac": "cmd+shift+k", "when": "focusedView == solvra.chatView" }
+    ],
+    "configuration": {
+      "title": "Solvra",
+      "properties": {
+        "solvra.provider": {
+          "type": "string",
+          "default": "google",
+          "enum": ["anthropic", "openai", "google", "ollama", "moonshot"],
+          "description": "Default AI provider"
+        },
+        "solvra.model": {
+          "type": "string",
+          "default": "gemini-2.5-flash",
+          "description": "Default model name"
+        },
+        "solvra.maxTurns": {
+          "type": "number",
+          "default": 10,
+          "description": "Default maximum number of agent turns"
+        },
+        "solvra.autoApprove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-approve tool permissions"
+        },
+        "solvra.googleApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Google API key for Gemini models",
+          "markdownDescription": "Google API key. Get yours at [aistudio.google.com](https://aistudio.google.com)"
+        },
+        "solvra.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API key for Claude models",
+          "markdownDescription": "Anthropic API key. Get yours at [console.anthropic.com](https://console.anthropic.com)"
+        },
+        "solvra.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key for GPT models",
+          "markdownDescription": "OpenAI API key. Get yours at [platform.openai.com](https://platform.openai.com)"
+        },
+        "solvra.moonshotApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Moonshot API key for Kimi models",
+          "markdownDescription": "Moonshot API key for Kimi models. Get yours at [platform.moonshot.ai](https://platform.moonshot.ai)"
+        },
+        "solvra.braveSearchKey": {
+          "type": "string",
+          "default": "",
+          "description": "Brave Search API key for web_search tool",
+          "markdownDescription": "Brave Search API key (free 2k/month). Get yours at [brave.com/search/api](https://brave.com/search/api/)"
+        },
+        "solvra.solvraPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Solvra repository root (the folder containing Solvra.sln). Leave blank for auto-detect. The extension expects a built Solvra.dll at src/Solvra/bin/Release/net8.0/ or Debug/net8.0/"
+        },
+        "solvra.dotnetPath": {
+          "type": "string",
+          "default": "dotnet",
+          "description": "Path to the dotnet executable (defaults to 'dotnet' on PATH)"
+        },
+        "solvra.permissionRules": {
+          "type": "object",
+          "default": {
+            "file_read": "always",
+            "grep": "always",
+            "glob": "always",
+            "file_write": "ask",
+            "file_edit": "ask",
+            "bash": "ask",
+            "code_run": "ask"
+          },
+          "description": "Per-tool permission hints (UI-level only — Solvra enforces permissions via its own session config)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "ts-loader": "^9.0.0",
+    "typescript": "^5.0.0",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^5.0.0"
+  }
+}
