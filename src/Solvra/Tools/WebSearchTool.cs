@@ -9,7 +9,10 @@ namespace Solvra.Tools;
 
 public class WebSearchTool : ToolBase
 {
-    private static readonly HttpClient HttpClient = new()
+    private static readonly HttpClient HttpClient = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false // Don't follow DDG redirects automatically
+    })
     {
         Timeout = TimeSpan.FromSeconds(15),
         DefaultRequestHeaders = { { "User-Agent", "Solvra/1.0" } }
@@ -37,6 +40,10 @@ public class WebSearchTool : ToolBase
 
         if (string.IsNullOrWhiteSpace(query))
             return new ToolExecuteResult("Error: query is required", true);
+
+        // Fix 6h: plan_mode support
+        if (context.PlanMode)
+            return new ToolExecuteResult($"Would search for: {query}", false);
 
         try
         {
@@ -67,9 +74,14 @@ public class WebSearchTool : ToolBase
     {
         var results = new List<SearchResult>();
 
-        // Extract result links from DuckDuckGo Lite HTML
-        var linkPattern = new Regex(@"<a[^>]+rel=""nofollow""[^>]+href=""([^""]+)""[^>]*>(.*?)</a>", RegexOptions.Singleline);
-        var snippetPattern = new Regex(@"<td[^>]*class=""result-snippet""[^>]*>(.*?)</td>", RegexOptions.Singleline);
+        // Fix 6h: Improved DDG Lite HTML parsing
+        // DDG Lite wraps results in <table> rows with specific patterns
+        var linkPattern = new Regex(
+            @"<a[^>]+rel=""nofollow""[^>]+href=""([^""]+)""[^>]*>(.*?)</a>",
+            RegexOptions.Singleline);
+        var snippetPattern = new Regex(
+            @"<td[^>]*class=""result-snippet""[^>]*>(.*?)</td>",
+            RegexOptions.Singleline);
 
         var links = linkPattern.Matches(html);
         var snippets = snippetPattern.Matches(html);
@@ -77,8 +89,11 @@ public class WebSearchTool : ToolBase
         for (var i = 0; i < Math.Min(links.Count, maxResults); i++)
         {
             var title = StripTags(links[i].Groups[2].Value).Trim();
-            var url = links[i].Groups[1].Value;
+            var rawUrl = links[i].Groups[1].Value;
             var snippet = i < snippets.Count ? StripTags(snippets[i].Groups[1].Value).Trim() : "";
+
+            // Fix 6h: Unwrap DDG /l/?uddg= redirects to get real URLs
+            var url = UnwrapDdgRedirect(rawUrl);
 
             if (!string.IsNullOrEmpty(title) && !string.IsNullOrEmpty(url))
                 results.Add(new SearchResult(title, url, snippet));
@@ -87,8 +102,45 @@ public class WebSearchTool : ToolBase
         return results;
     }
 
+    /// <summary>
+    /// Fix 6h: Extract real URL from DDG redirect wrapper.
+    /// DDG Lite uses /l/?uddg=URL&amp;rut=... format.
+    /// </summary>
+    internal static string UnwrapDdgRedirect(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return url;
+
+        // Check for DDG redirect pattern
+        if (url.Contains("/l/?") || url.Contains("/l?"))
+        {
+            // Extract uddg parameter
+            var match = Regex.Match(url, @"[?&]uddg=([^&]+)");
+            if (match.Success)
+            {
+                var decoded = WebUtility.UrlDecode(match.Groups[1].Value);
+                return decoded;
+            }
+        }
+
+        // Check if it's a relative DDG URL
+        if (url.StartsWith("//duckduckgo.com/l/"))
+        {
+            var match = Regex.Match(url, @"[?&]uddg=([^&]+)");
+            if (match.Success)
+                return WebUtility.UrlDecode(match.Groups[1].Value);
+        }
+
+        return url;
+    }
+
     private static string StripTags(string html)
     {
-        return Regex.Replace(html, @"<[^>]+>", "").Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">");
+        return Regex.Replace(html, @"<[^>]+>", "")
+            .Replace("&amp;", "&")
+            .Replace("&lt;", "<")
+            .Replace("&gt;", ">")
+            .Replace("&quot;", "\"")
+            .Replace("&#x27;", "'")
+            .Replace("&nbsp;", " ");
     }
 }

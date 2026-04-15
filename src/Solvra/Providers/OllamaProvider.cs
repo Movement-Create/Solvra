@@ -122,6 +122,50 @@ public sealed class OllamaProvider : IProvider
         {
             if (msg.Role == MessageRole.System) continue;
 
+            if (msg.Role == MessageRole.Assistant)
+            {
+                var toolUses = msg.Content.OfType<ToolUseContent>().ToList();
+                if (toolUses.Count > 0)
+                {
+                    var obj = new JsonObject { ["role"] = "assistant" };
+                    var textContent = msg.GetTextContent();
+                    if (!string.IsNullOrEmpty(textContent))
+                        obj["content"] = textContent;
+
+                    var tcArr = new JsonArray();
+                    foreach (var tu in toolUses)
+                    {
+                        tcArr.Add(new JsonObject
+                        {
+                            ["function"] = new JsonObject
+                            {
+                                ["name"] = tu.Name,
+                                ["arguments"] = JsonNode.Parse(JsonSerializer.Serialize(tu.Input))
+                            }
+                        });
+                    }
+                    obj["tool_calls"] = tcArr;
+                    messages.Add(obj);
+                    continue;
+                }
+            }
+
+            if (msg.Role == MessageRole.Tool)
+            {
+                foreach (var block in msg.Content)
+                {
+                    if (block is ToolResultContent tr)
+                    {
+                        messages.Add(new JsonObject
+                        {
+                            ["role"] = "tool",
+                            ["content"] = tr.Content
+                        });
+                    }
+                }
+                continue;
+            }
+
             var text = ExtractText(msg);
             messages.Add(new JsonObject
             {

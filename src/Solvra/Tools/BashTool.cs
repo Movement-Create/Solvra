@@ -36,20 +36,15 @@ public class BashTool : ToolBase
         if (string.IsNullOrWhiteSpace(command))
             return new ToolExecuteResult("Error: command is required", true);
 
-        var timeoutMs = GetInt(input, "timeout_ms", 30000);
         var cwd = GetOptionalString(input, "cwd") ?? context.Cwd;
 
-        var savedTimeout = _sandbox;
-        var config = new SandboxConfig(TimeoutMs: timeoutMs);
-        var sandbox = new SandboxManager(config);
-
-        var result = await sandbox.ExecAsync(command, cwd, context.Env, ct);
+        var result = await _sandbox.ExecAsync(command, cwd, context.Env, ct);
 
         if (result.Blocked)
             return new ToolExecuteResult($"[Blocked] {result.BlockReason}", true);
 
         if (result.TimedOut)
-            return new ToolExecuteResult($"Command timed out after {timeoutMs}ms\n{result.Stdout}{result.Stderr}", true);
+            return new ToolExecuteResult($"Command timed out\n{result.Stdout}{result.Stderr}", true);
 
         var output = result.Stdout;
         if (!string.IsNullOrEmpty(result.Stderr))

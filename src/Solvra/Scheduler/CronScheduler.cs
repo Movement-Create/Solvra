@@ -4,12 +4,6 @@ using System.Text.RegularExpressions;
 
 namespace Solvra.Scheduler;
 
-public record CronJobConfig(
-    string Name,
-    string Schedule,
-    string Prompt,
-    bool Enabled = true);
-
 public class CronScheduler : IAsyncDisposable
 {
     private readonly Dictionary<string, CronJobState> _jobs = new(StringComparer.OrdinalIgnoreCase);
@@ -17,7 +11,7 @@ public class CronScheduler : IAsyncDisposable
     private Task? _runLoop;
 
     /// <summary>
-    /// Delegate invoked to run an agent. Parameters: (prompt, title) → result text
+    /// Delegate invoked to run an agent. Parameters: (prompt, title) -> result text
     /// </summary>
     public Func<string, string, CancellationToken, Task<string>>? RunAgentDelegate { get; set; }
 
@@ -26,7 +20,7 @@ public class CronScheduler : IAsyncDisposable
     /// </summary>
     public Func<string, string, string?, Task>? LogToMemoryDelegate { get; set; }
 
-    public void AddJob(CronJobConfig config)
+    public void AddJob(Config.CronJobConfig config)
     {
         if (!ValidateCronExpression(config.Schedule))
             throw new ArgumentException($"Invalid cron expression: {config.Schedule}");
@@ -36,12 +30,19 @@ public class CronScheduler : IAsyncDisposable
 
     public void RemoveJob(string name) => _jobs.Remove(name);
 
-    public IReadOnlyList<CronJobConfig> ListJobs() => _jobs.Values.Select(j => j.Config).ToList();
+    public IReadOnlyList<Config.CronJobConfig> ListJobs() => _jobs.Values.Select(j => j.Config).ToList();
 
     public void Start()
     {
         _cts = new CancellationTokenSource();
         _runLoop = RunLoopAsync(_cts.Token);
+    }
+
+    public async Task StartAsync(CancellationToken ct)
+    {
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _runLoop = RunLoopAsync(_cts.Token);
+        await _runLoop;
     }
 
     public async Task StopAsync()
@@ -62,7 +63,8 @@ public class CronScheduler : IAsyncDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), ct);
+                // Fix 6i: Reduce polling to 15 seconds for more precise scheduling
+                await Task.Delay(TimeSpan.FromSeconds(15), ct);
 
                 var now = DateTime.UtcNow;
                 foreach (var (name, state) in _jobs)
@@ -83,7 +85,7 @@ public class CronScheduler : IAsyncDisposable
         }
     }
 
-    private async Task RunJobAsync(CronJobConfig config, CancellationToken ct)
+    private async Task RunJobAsync(Config.CronJobConfig config, CancellationToken ct)
     {
         try
         {
@@ -103,12 +105,12 @@ public class CronScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// Simple cron matching: checks if the current minute matches the cron expression.
+    /// Cron matching: checks if the current minute matches the cron expression.
     /// Supports 5-field cron: minute hour day-of-month month day-of-week.
     /// </summary>
     public static bool ShouldRun(string cronExpr, DateTime now, DateTime? lastRun)
     {
-        // Don't run if we ran within the last minute
+        // Don't run if we ran within the last 55 seconds
         if (lastRun.HasValue && (now - lastRun.Value).TotalSeconds < 55)
             return false;
 
@@ -122,43 +124,64 @@ public class CronScheduler : IAsyncDisposable
             && FieldMatches(fields[4], (int)now.DayOfWeek, 0, 6);
     }
 
-    private static bool FieldMatches(string field, int value, int min, int max)
+    /// <summary>
+    /// Fix 6i: Support combination cron expressions like "*/5,10-20" or "1,5,10-15".
+    /// Split on comma first, then evaluate each sub-expression.
+    /// </summary>
+    internal static bool FieldMatches(string field, int value, int min, int max)
     {
         if (field == "*") return true;
 
-        // Handle step: */N
-        if (field.StartsWith("*/"))
+        // Fix 6i: Handle comma-separated combination expressions
+        if (field.Contains(','))
         {
-            if (int.TryParse(field[2..], out var step) && step > 0)
+            return field.Split(',').Any(part => EvaluateFieldPart(part.Trim(), value, min, max));
+        }
+
+        return EvaluateFieldPart(field, value, min, max);
+    }
+
+    private static bool EvaluateFieldPart(string part, int value, int min, int max)
+    {
+        // Handle step: */N
+        if (part.StartsWith("*/"))
+        {
+            if (int.TryParse(part[2..], out var step) && step > 0)
                 return value % step == 0;
             return false;
         }
 
-        // Handle range: A-B
-        if (field.Contains('-'))
+        // Handle range with optional step: A-B or A-B/N
+        if (part.Contains('-'))
         {
-            var parts = field.Split('-');
-            if (parts.Length == 2 && int.TryParse(parts[0], out var low) && int.TryParse(parts[1], out var high))
-                return value >= low && value <= high;
+            var stepSplit = part.Split('/');
+            var rangePart = stepSplit[0];
+            var step = stepSplit.Length > 1 && int.TryParse(stepSplit[1], out var s) ? s : 1;
+
+            var rangeParts = rangePart.Split('-');
+            if (rangeParts.Length == 2 &&
+                int.TryParse(rangeParts[0], out var low) &&
+                int.TryParse(rangeParts[1], out var high))
+            {
+                if (value < low || value > high) return false;
+                return (value - low) % step == 0;
+            }
             return false;
         }
 
-        // Handle list: A,B,C
-        if (field.Contains(','))
-        {
-            return field.Split(',').Any(v => int.TryParse(v.Trim(), out var n) && n == value);
-        }
-
         // Single value
-        return int.TryParse(field, out var exact) && exact == value;
+        return int.TryParse(part, out var exact) && exact == value;
     }
 
+    /// <summary>
+    /// Fix 6i: Updated validation to support combination expressions.
+    /// </summary>
     public static bool ValidateCronExpression(string expression)
     {
         var fields = expression.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (fields.Length != 5) return false;
 
-        var pattern = new Regex(@"^(\*|(\*/\d+)|\d+(-\d+)?|\d+(,\d+)*)$");
+        var pattern = new Regex(@"^(\*|(\*/\d+)|\d+(-\d+(/\d+)?)?)(,(\*|(\*/\d+)|\d+(-\d+(/\d+)?)?))*$");
         return fields.All(f => pattern.IsMatch(f));
     }
 
@@ -169,5 +192,5 @@ public class CronScheduler : IAsyncDisposable
         GC.SuppressFinalize(this);
     }
 
-    private record CronJobState(CronJobConfig Config, DateTime? LastRun);
+    private record CronJobState(Config.CronJobConfig Config, DateTime? LastRun);
 }

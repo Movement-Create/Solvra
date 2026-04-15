@@ -47,8 +47,17 @@ public record SolvraConfig
     [JsonPropertyName("observability")]
     public ObservabilityConfig Observability { get; init; } = new();
 
+    /// <summary>
+    /// Fix 6d: Cron job definitions with Name, Schedule, Prompt, Model.
+    /// </summary>
     [JsonPropertyName("cron")]
     public List<CronJobConfig> Cron { get; init; } = [];
+
+    /// <summary>
+    /// Webhook authentication secret.
+    /// </summary>
+    [JsonPropertyName("webhook_secret")]
+    public string? WebhookSecret { get; init; }
 
     public EffortLevel ParsedEffort => EffortLevelExtensions.Parse(Effort);
 }
@@ -90,6 +99,12 @@ public record CronJobConfig
 
     [JsonPropertyName("prompt")]
     public required string Prompt { get; init; }
+
+    /// <summary>
+    /// Fix 6d: Optional model override for this cron job.
+    /// </summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; init; }
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; init; } = true;

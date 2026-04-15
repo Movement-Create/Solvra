@@ -6,11 +6,25 @@ using System.Text;
 namespace Solvra.Security;
 
 public record SandboxConfig(
-    bool Enabled = true,
+    bool Enabled = false,
     bool BlockDangerous = true,
-    int TimeoutMs = 30000,
-    int MaxOutputBytes = 50 * 1024,
-    string? AllowedDirectory = null);
+    int TimeoutMs = 30_000,
+    int MaxOutputBytes = 1_048_576,
+    string? AllowedDirectory = null,
+    string? RootDir = null,
+    string[]? EnvAllowlist = null,
+    int? Uid = null,
+    int? Gid = null)
+{
+    public static readonly string[] DefaultEnvAllowlist =
+    [
+        "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TERM",
+        "NODE_ENV", "NPM_CONFIG_PREFIX", "NVM_DIR"
+    ];
+
+    public string EffectiveRootDir => RootDir ?? Directory.GetCurrentDirectory();
+    public string[] EffectiveEnvAllowlist => EnvAllowlist ?? DefaultEnvAllowlist;
+}
 
 public record SandboxExecResult(
     string Stdout,
@@ -154,7 +168,7 @@ public class SandboxManager
 
         if (totalRead >= maxBytes)
         {
-            sb.Append("\n[Output truncated at 50KB]");
+            sb.Append("\n[Output truncated at max bytes limit]");
         }
     }
 

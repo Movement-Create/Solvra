@@ -197,9 +197,32 @@ public sealed class OpenAiProvider : IProvider
                 continue;
             }
 
-            // User messages
-            var userText = msg.GetTextContent();
-            messages.Add(new JsonObject { ["role"] = "user", ["content"] = userText });
+            // User messages — handle mixed text+image content
+            var hasImage = msg.Content.OfType<ImageContent>().Any();
+            if (hasImage)
+            {
+                var contentParts = new JsonArray();
+                foreach (var part in msg.Content)
+                {
+                    if (part is TextContent textPart)
+                        contentParts.Add(new JsonObject { ["type"] = "text", ["text"] = textPart.Text });
+                    else if (part is ImageContent ic)
+                    {
+                        var imageUrl = ic.Source.Url ?? $"data:{ic.Source.MediaType};base64,{ic.Source.Data}";
+                        contentParts.Add(new JsonObject
+                        {
+                            ["type"] = "image_url",
+                            ["image_url"] = new JsonObject { ["url"] = imageUrl }
+                        });
+                    }
+                }
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = contentParts });
+            }
+            else
+            {
+                var userText = msg.GetTextContent();
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = userText });
+            }
         }
 
         var request = new JsonObject

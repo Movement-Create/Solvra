@@ -62,16 +62,12 @@ public static class Context
         if (ModelContextLimits.TryGetValue(model, out var limit))
             return limit;
 
-        // Prefix match: take first 2 dash-separated segments
-        var parts = model.Split('-');
-        if (parts.Length >= 2)
+        // Fix 6f: Prefix match — split the KEY, not the input model
+        foreach (var (key, value) in ModelContextLimits)
         {
-            var prefix = $"{parts[0]}-{parts[1]}";
-            foreach (var (key, value) in ModelContextLimits)
-            {
-                if (key.StartsWith(prefix))
-                    return value;
-            }
+            var keyPrefix = string.Join("-", key.Split('-').Take(2));
+            if (model.StartsWith(keyPrefix))
+                return value;
         }
 
         return DefaultContextLimit;
@@ -178,7 +174,8 @@ public static class Context
 
         // Insert compaction notice
         var pct = (int)(fraction * 100);
-        result.Add(Message.FromText(MessageRole.System,
+        // Fix 6e: Use User role, not System — matches Altimeter behavior
+        result.Add(Message.FromText(MessageRole.User,
             $"[Context compacted: {pct}% of conversation history removed to fit context window]"));
 
         // Keep recent messages

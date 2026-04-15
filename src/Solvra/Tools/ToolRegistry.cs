@@ -2,11 +2,12 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Solvra.Models;
 using Solvra.Security;
 
 namespace Solvra.Tools;
 
-public class ToolRegistry
+public class ToolRegistry : IToolRegistry
 {
     private readonly Dictionary<string, ITool> _tools = new(StringComparer.OrdinalIgnoreCase);
     private readonly PermissionChecker _permissionChecker = new();
@@ -25,6 +26,9 @@ public class ToolRegistry
         _tools[tool.Name] = tool;
     }
 
+    // Explicit IToolRegistry implementation
+    void IToolRegistry.RegisterTool(ITool tool) => RegisterTool(tool);
+
     public ITool? GetTool(string name)
     {
         return _tools.TryGetValue(name, out var tool) ? tool : null;
@@ -32,18 +36,19 @@ public class ToolRegistry
 
     public IReadOnlyList<ITool> GetAllTools() => _tools.Values.ToList();
 
-    public List<JsonElement> GetToolDefinitions()
+    public IReadOnlyList<ToolDefinition> GetToolDefinitions()
     {
         return _tools.Values.Select(tool =>
         {
-            var def = new
+            var schemaElement = tool.GetInputSchema();
+            var schema = JsonSerializer.Deserialize<ToolInputSchema>(schemaElement.GetRawText())
+                         ?? new ToolInputSchema();
+            return new ToolDefinition
             {
-                name = tool.Name,
-                description = tool.Description,
-                input_schema = tool.GetInputSchema()
+                Name = tool.Name,
+                Description = tool.Description,
+                InputSchema = schema
             };
-            var json = JsonSerializer.Serialize(def);
-            return JsonDocument.Parse(json).RootElement;
         }).ToList();
     }
 
@@ -51,25 +56,15 @@ public class ToolRegistry
         string name,
         JsonElement input,
         ToolExecutionContext context,
-        PermissionMode permissionMode,
-        Func<ITool, Task<bool>>? permissionCallback = null,
         CancellationToken ct = default)
     {
-        // 1. Tool exists?
         var tool = GetTool(name);
         if (tool == null)
             return new ToolExecuteResult($"Tool \"{name}\" not found", true);
 
-        // 2. Tool allowed in this session?
         if (!IsToolAllowed(name, context.Session))
             return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);
 
-        // 3. Permission check
-        var permissionGranted = await _permissionChecker.CheckPermissionAsync(tool, permissionMode, permissionCallback);
-        if (!permissionGranted)
-            return new ToolExecuteResult($"Tool \"{name}\" requires permission level \"{tool.PermissionLevel}\" which was denied.", true);
-
-        // 4. Execute with timing
         var sw = Stopwatch.StartNew();
         ToolExecuteResult result;
         try
@@ -82,7 +77,45 @@ public class ToolRegistry
         }
         sw.Stop();
 
-        // 5. Audit log
+        if (_auditLogger != null)
+        {
+            await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds);
+        }
+
+        return result;
+    }
+
+    public async Task<ToolExecuteResult> ExecuteToolAsync(
+        string name,
+        JsonElement input,
+        ToolExecutionContext context,
+        PermissionMode permissionMode,
+        Func<ITool, Task<bool>>? permissionCallback = null,
+        CancellationToken ct = default)
+    {
+        var tool = GetTool(name);
+        if (tool == null)
+            return new ToolExecuteResult($"Tool \"{name}\" not found", true);
+
+        if (!IsToolAllowed(name, context.Session))
+            return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);
+
+        var permissionGranted = await _permissionChecker.CheckPermissionAsync(tool, permissionMode, permissionCallback);
+        if (!permissionGranted)
+            return new ToolExecuteResult($"Tool \"{name}\" requires permission level \"{tool.PermissionLevel}\" which was denied.", true);
+
+        var sw = Stopwatch.StartNew();
+        ToolExecuteResult result;
+        try
+        {
+            result = await tool.ExecuteAsync(input, context, ct);
+        }
+        catch (Exception ex)
+        {
+            result = new ToolExecuteResult($"Tool \"{name}\" threw an error: {ex.Message}", true);
+        }
+        sw.Stop();
+
         if (_auditLogger != null)
         {
             await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds);
@@ -93,11 +126,9 @@ public class ToolRegistry
 
     private static bool IsToolAllowed(string name, SessionInfo session)
     {
-        // Disallowed list takes priority
         if (session.DisallowedTools.Contains(name, StringComparer.OrdinalIgnoreCase))
             return false;
 
-        // If allowed_tools is specified, tool must be in it
         if (session.AllowedTools.Count > 0)
             return session.AllowedTools.Contains(name, StringComparer.OrdinalIgnoreCase);
 

@@ -2,8 +2,14 @@ using System.CommandLine;
 using System.Text.Json;
 using Solvra.Config;
 using Solvra.Core;
+using Solvra.Hooks;
+using Solvra.Memory;
 using Solvra.Models;
+using Solvra.Observability;
 using Solvra.Providers;
+using Solvra.Security;
+using Solvra.Skills;
+using Solvra.Tools;
 
 namespace Solvra;
 
@@ -70,9 +76,30 @@ public static class Program
                 DisallowedTools = config.DisallowedTools
             };
 
-            var router = new ModelRouter();
-            var toolRegistry = new ToolRegistry();
-            var agentLoop = new AgentLoop(router, toolRegistry);
+            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
+                BuildSubsystems(config);
+
+            // Set up AgentTool delegate
+            AgentTool.RunAgentDelegate = async (agentPrompt, agentModel, agentSystem, agentMaxTurns, agentCt) =>
+            {
+                var subLoop = new AgentLoop(router, registry, hookEngine, auditLogger, tracer: tracer);
+                var subSession = sessionConfig with
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Model = agentModel ?? sessionConfig.Model,
+                    MaxTurns = agentMaxTurns
+                };
+                var subResult = await subLoop.RunAsync(new AgentRunOptions
+                {
+                    Prompt = agentPrompt,
+                    Session = subSession,
+                    SystemPrompt = agentSystem,
+                    Streaming = false
+                }, agentCt);
+                return subResult.Text ?? "";
+            };
+
+            var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
             var reflection = new Reflection(agentLoop);
 
             var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
@@ -142,10 +169,34 @@ public static class Program
             var ct = context.GetCancellationToken();
 
             var config = await ConfigLoader.LoadAsync();
-            var router = new ModelRouter();
-            var toolRegistry = new ToolRegistry();
-            var agentLoop = new AgentLoop(router, toolRegistry);
+
+            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
+                BuildSubsystems(config);
+
             var sessionMgr = new SessionManager(config.SessionsDir);
+
+            // Set up AgentTool delegate
+            AgentTool.RunAgentDelegate = async (agentPrompt, agentModel, agentSystem, agentMaxTurns, agentCt) =>
+            {
+                var subLoop = new AgentLoop(router, registry, hookEngine, auditLogger, tracer: tracer);
+                var subResult = await subLoop.RunAsync(new AgentRunOptions
+                {
+                    Prompt = agentPrompt,
+                    Session = new SessionConfig
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        CreatedAt = DateTime.UtcNow.ToString("o"),
+                        Model = agentModel ?? config.Model,
+                        MaxTurns = agentMaxTurns
+                    },
+                    SystemPrompt = agentSystem,
+                    Streaming = false
+                }, agentCt);
+                return subResult.Text ?? "";
+            };
+
+            var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
+            var reflection = new Reflection(agentLoop);
 
             var history = new List<Message>();
             SessionConfig sessionConfig;
@@ -195,14 +246,14 @@ public static class Program
                         Console.WriteLine($"Turns: {history.Count(m => m.Role == MessageRole.User)}");
                         continue;
                     case "/tools":
-                        foreach (var tool in toolRegistry.GetToolDefinitions())
+                        foreach (var tool in registry.GetToolDefinitions())
                             Console.WriteLine($"  {tool.Name}: {tool.Description}");
                         continue;
                     case "":
                         continue;
                 }
 
-                var result = await agentLoop.RunAsync(new AgentRunOptions
+                var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
                 {
                     Prompt = input,
                     Session = sessionConfig,
@@ -330,5 +381,22 @@ public static class Program
         rootCommand.AddCommand(sessionCommand);
 
         return await rootCommand.InvokeAsync(args);
+    }
+
+    private static (ModelRouter Router, ToolRegistry Registry, HookEngine HookEngine, AuditLogger AuditLogger, SkillLoader SkillLoader, MemoryManager MemoryManager, PermissionChecker PermissionChecker, Tracer Tracer) BuildSubsystems(SolvraConfig config)
+    {
+        var router = new ModelRouter();
+        var auditLogger = new AuditLogger("logs");
+        var sandbox = new SandboxManager(new SandboxConfig());
+        var registry = new ToolRegistry(auditLogger);
+        registry.RegisterBuiltins(sandbox);
+
+        var hookEngine = new HookEngine();
+        var skillLoader = new SkillLoader(config.SkillsDir);
+        var memoryManager = new MemoryManager(config.MemoryDir);
+        var permissionChecker = new PermissionChecker();
+        var tracer = new Tracer("Solvra");
+
+        return (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer);
     }
 }

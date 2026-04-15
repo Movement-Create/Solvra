@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Solvra.Memory;
@@ -46,23 +47,21 @@ public class MemoryManager
             }
         }
 
-        // Search recent daily logs
-        var logsDir = Path.Combine(_memoryDir, "daily");
-        if (Directory.Exists(logsDir))
-        {
-            var recentLogs = Directory.GetFiles(logsDir, "*.md")
+        // Search recent daily logs — Fix 5d: use memory/ not memory/daily/
+        var recentLogs = Directory.Exists(_memoryDir)
+            ? Directory.GetFiles(_memoryDir, "????-??-??.md")
                 .OrderByDescending(f => f)
-                .Take(7);
+                .Take(7)
+            : Enumerable.Empty<string>();
 
-            foreach (var logFile in recentLogs)
+        foreach (var logFile in recentLogs)
+        {
+            var logContent = await File.ReadAllTextAsync(logFile);
+            var logMatches = SearchContent(logContent, query);
+            if (logMatches.Count > 0)
             {
-                var logContent = await File.ReadAllTextAsync(logFile);
-                var logMatches = SearchContent(logContent, query);
-                if (logMatches.Count > 0)
-                {
-                    results.Add($"=== {Path.GetFileNameWithoutExtension(logFile)} ===");
-                    results.AddRange(logMatches);
-                }
+                results.Add($"=== {Path.GetFileNameWithoutExtension(logFile)} ===");
+                results.AddRange(logMatches);
             }
         }
 
@@ -84,6 +83,85 @@ public class MemoryManager
         var tagsStr = tags?.Length > 0 ? $" [{string.Join(", ", tags)}]" : "";
         var entry = $"\n## {DateTime.UtcNow:yyyy-MM-dd}{tagsStr}\n{content}\n";
         await File.AppendAllTextAsync(path, entry);
+    }
+
+    /// <summary>
+    /// Fix 5a: Atomic overwrite of lessons with .bak backup.
+    /// </summary>
+    public async Task WriteLessonsAsync(List<Lesson> lessons)
+    {
+        Directory.CreateDirectory(_memoryDir);
+        var path = Path.Combine(_memoryDir, "lessons.md");
+        var backup = path + ".bak";
+
+        if (File.Exists(path))
+            File.Copy(path, backup, overwrite: true);
+
+        var content = string.Join("\n\n", lessons.Select(l =>
+            $"## {l.Date} [{string.Join(", ", l.Tags)}]\n{l.Content}"));
+
+        await File.WriteAllTextAsync(path, content);
+    }
+
+    /// <summary>
+    /// Fix 5b: Load facts.md content.
+    /// </summary>
+    public async Task<string?> LoadFactsAsync()
+    {
+        var path = Path.Combine(_memoryDir, "facts.md");
+        return File.Exists(path) ? await File.ReadAllTextAsync(path) : null;
+    }
+
+    /// <summary>
+    /// Fix 5c: Log a conversation to the daily log file.
+    /// Fix 5d: Uses memory/YYYY-MM-DD.md not memory/daily/YYYY-MM-DD.md.
+    /// </summary>
+    public async Task LogConversationAsync(string prompt, string response, string sessionId)
+    {
+        Directory.CreateDirectory(_memoryDir);
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var logPath = Path.Combine(_memoryDir, $"{today}.md");
+        var promptSnippet = prompt.Length > 200 ? prompt[..200] : prompt;
+        var responseSnippet = response.Length > 200 ? response[..200] : response;
+        var snippet = $"## {DateTime.UtcNow:HH:mm} \u2014 Session {sessionId}\n**User:** {promptSnippet}\n**Agent:** {responseSnippet}\n\n";
+        await File.AppendAllTextAsync(logPath, snippet);
+    }
+
+    /// <summary>
+    /// Fix 5e: Rebuild keyword index from all .md files in memory/.
+    /// Writes memory/index.json.
+    /// </summary>
+    public async Task RebuildIndexAsync()
+    {
+        if (!Directory.Exists(_memoryDir)) return;
+
+        var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in Directory.GetFiles(_memoryDir, "*.md"))
+        {
+            var filename = Path.GetFileName(file);
+            if (filename == "index.json") continue;
+
+            var content = await File.ReadAllTextAsync(file);
+            var words = Regex.Split(content.ToLowerInvariant(), @"[^a-z0-9_./-]+")
+                .Where(w => w.Length >= 3)
+                .Distinct();
+
+            foreach (var word in words)
+            {
+                if (!index.TryGetValue(word, out var files))
+                {
+                    files = new List<string>();
+                    index[word] = files;
+                }
+                if (!files.Contains(filename))
+                    files.Add(filename);
+            }
+        }
+
+        var indexPath = Path.Combine(_memoryDir, "index.json");
+        var json = JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(indexPath, json);
     }
 
     public async Task<List<Lesson>> GetRelevantLessonsAsync(string prompt)
@@ -170,10 +248,9 @@ public class MemoryManager
 
     public async Task AppendToDailyLogAsync(string content, string? sessionId = null)
     {
-        var dailyDir = Path.Combine(_memoryDir, "daily");
-        Directory.CreateDirectory(dailyDir);
-
-        var path = Path.Combine(dailyDir, $"{DateTime.UtcNow:yyyy-MM-dd}.md");
+        // Fix 5d: Use memory/YYYY-MM-DD.md not memory/daily/YYYY-MM-DD.md
+        Directory.CreateDirectory(_memoryDir);
+        var path = Path.Combine(_memoryDir, $"{DateTime.UtcNow:yyyy-MM-dd}.md");
         var prefix = sessionId != null ? $"[{sessionId}] " : "";
         var entry = $"\n### {DateTime.UtcNow:HH:mm:ss} {prefix}\n{content}\n";
         await File.AppendAllTextAsync(path, entry);

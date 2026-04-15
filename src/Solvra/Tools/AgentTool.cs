@@ -10,6 +10,8 @@ namespace Solvra.Tools;
 /// </summary>
 public class AgentTool : ToolBase
 {
+    private const int MaxSubagentDepth = 2;
+
     /// <summary>
     /// Delegate that runs the agent loop. Set by the agent loop module to avoid circular dependencies.
     /// </summary>
@@ -27,7 +29,7 @@ public class AgentTool : ToolBase
             prompt = new { type = "string", description = "Prompt for the subagent" },
             model = new { type = "string", description = "Model to use (optional)" },
             system_prompt = new { type = "string", description = "Custom system prompt (optional)" },
-            max_turns = new { type = "integer", description = "Maximum turns (default 10)", @default = 10 }
+            max_turns = new { type = "integer", description = "Maximum turns (default 20)", @default = 20 }
         },
         required = new[] { "prompt" }
     });
@@ -41,9 +43,17 @@ public class AgentTool : ToolBase
         if (RunAgentDelegate == null)
             return new ToolExecuteResult("Error: agent loop not configured. Set AgentTool.RunAgentDelegate.", true);
 
+        // Depth cap: check SubagentDepth from context env
+        if (context.Env.TryGetValue("__subagent_depth", out var depthStr) &&
+            int.TryParse(depthStr, out var currentDepth) &&
+            currentDepth >= MaxSubagentDepth)
+        {
+            return new ToolExecuteResult($"Error: maximum subagent nesting depth ({MaxSubagentDepth}) reached.", true);
+        }
+
         var model = GetOptionalString(input, "model");
         var systemPrompt = GetOptionalString(input, "system_prompt");
-        var maxTurns = GetInt(input, "max_turns", 10);
+        var maxTurns = GetInt(input, "max_turns", 20);
 
         try
         {
