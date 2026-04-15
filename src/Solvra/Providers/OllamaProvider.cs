@@ -41,7 +41,7 @@ public sealed class OllamaProvider : IProvider
         return ParseResponse(body);
     }
 
-    public async IAsyncEnumerable<string> StreamAsync(CompletionOptions options,
+    public async IAsyncEnumerable<StreamEvent> StreamAsync(CompletionOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = BuildRequest(options, stream: true);
@@ -55,6 +55,8 @@ public sealed class OllamaProvider : IProvider
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
+        int inputTokens = 0, outputTokens = 0;
+
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -63,15 +65,48 @@ public sealed class OllamaProvider : IProvider
             var root = doc.RootElement;
 
             if (root.TryGetProperty("done", out var done) && done.GetBoolean())
-                break;
-
-            if (root.TryGetProperty("message", out var message) &&
-                message.TryGetProperty("content", out var content) &&
-                content.ValueKind == JsonValueKind.String)
             {
-                var text = content.GetString();
-                if (!string.IsNullOrEmpty(text))
-                    yield return text;
+                if (root.TryGetProperty("prompt_eval_count", out var pec)) inputTokens = pec.GetInt32();
+                if (root.TryGetProperty("eval_count", out var ec)) outputTokens = ec.GetInt32();
+                var stopReason = root.TryGetProperty("done_reason", out var dr) ? dr.GetString() ?? "stop" : "stop";
+
+                yield return new StreamMessageEnd(
+                    new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens },
+                    stopReason);
+                break;
+            }
+
+            if (root.TryGetProperty("message", out var message))
+            {
+                if (message.TryGetProperty("content", out var content) &&
+                    content.ValueKind == JsonValueKind.String)
+                {
+                    var text = content.GetString();
+                    if (!string.IsNullOrEmpty(text))
+                        yield return new StreamText(text);
+                }
+
+                // Ollama may include tool_calls in streaming chunks
+                if (message.TryGetProperty("tool_calls", out var toolCalls))
+                {
+                    int i = 0;
+                    foreach (var tc in toolCalls.EnumerateArray())
+                    {
+                        if (tc.TryGetProperty("function", out var func))
+                        {
+                            var name = func.GetProperty("name").GetString() ?? "";
+                            var callId = $"ollama_call_{i}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+                            var argsJson = func.TryGetProperty("arguments", out var args)
+                                ? args.GetRawText()
+                                : "{}";
+
+                            yield return new StreamToolUseStart(callId, name);
+                            yield return new StreamToolUseDelta(callId, argsJson);
+                            yield return new StreamToolUseEnd(callId);
+                            i++;
+                        }
+                    }
+                }
             }
         }
     }

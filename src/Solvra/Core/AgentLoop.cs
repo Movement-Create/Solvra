@@ -147,17 +147,58 @@ public sealed class AgentLoop
                 if (options.Streaming)
                 {
                     var text = new System.Text.StringBuilder();
-                    await foreach (var chunk in provider.StreamAsync(completionOptions, ct))
+                    var toolCalls = new List<ToolCall>();
+                    var currentToolArgs = new Dictionary<string, System.Text.StringBuilder>();
+                    string streamStopReason = "end_turn";
+                    TokenUsage? streamUsage = null;
+
+                    await foreach (var evt in provider.StreamAsync(completionOptions, ct))
                     {
-                        text.Append(chunk);
-                        options.OnText?.Invoke(chunk);
+                        switch (evt)
+                        {
+                            case StreamText t:
+                                text.Append(t.Delta);
+                                options.OnText?.Invoke(t.Delta);
+                                break;
+
+                            case StreamToolUseStart start:
+                                currentToolArgs[start.Id] = new System.Text.StringBuilder();
+                                toolCalls.Add(new ToolCall
+                                {
+                                    Id = start.Id,
+                                    Name = start.Name,
+                                    Input = new Dictionary<string, JsonElement>()
+                                });
+                                break;
+
+                            case StreamToolUseDelta delta:
+                                if (currentToolArgs.TryGetValue(delta.Id, out var sb))
+                                    sb.Append(delta.JsonFragment);
+                                break;
+
+                            case StreamToolUseEnd end:
+                                if (currentToolArgs.TryGetValue(end.Id, out var argsSb))
+                                {
+                                    var tc = toolCalls.FirstOrDefault(t => t.Id == end.Id);
+                                    if (tc != null)
+                                        tc.Input = OpenAiProvider.ParseToolArguments(argsSb.ToString());
+                                    currentToolArgs.Remove(end.Id);
+                                }
+                                break;
+
+                            case StreamMessageEnd msgEnd:
+                                streamStopReason = msgEnd.StopReason;
+                                streamUsage = msgEnd.Usage;
+                                break;
+                        }
                     }
+
                     response = new LlmResponse
                     {
                         Text = text.ToString(),
-                        ToolCalls = Array.Empty<ToolCall>(),
-                        StopReason = "end_turn",
-                        Usage = new TokenUsage
+                        ToolCalls = toolCalls,
+                        StopReason = streamStopReason,
+                        Usage = streamUsage ?? new TokenUsage
                         {
                             InputTokens = Context.EstimateContextTokens(compressedMessages),
                             OutputTokens = Context.EstimateTokens(text.ToString())

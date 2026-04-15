@@ -57,10 +57,9 @@ public sealed class GoogleProvider : IProvider
         return ParseResponse(body);
     }
 
-    public async IAsyncEnumerable<string> StreamAsync(CompletionOptions options,
+    public async IAsyncEnumerable<StreamEvent> StreamAsync(CompletionOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        // Google supports streaming via streamGenerateContent
         var url = $"{BaseUrl}/{options.Model}:streamGenerateContent?key={_apiKey}&alt=sse";
         var request = BuildRequest(options);
 
@@ -73,6 +72,9 @@ public sealed class GoogleProvider : IProvider
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
+        string stopReason = "STOP";
+        int inputTokens = 0, outputTokens = 0;
+
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             if (!line.StartsWith("data: ")) continue;
@@ -80,19 +82,49 @@ public sealed class GoogleProvider : IProvider
 
             using var doc = JsonDocument.Parse(data);
             var root = doc.RootElement;
+
+            if (root.TryGetProperty("usageMetadata", out var usage))
+            {
+                if (usage.TryGetProperty("promptTokenCount", out var pt)) inputTokens = pt.GetInt32();
+                if (usage.TryGetProperty("candidatesTokenCount", out var ct2)) outputTokens = ct2.GetInt32();
+            }
+
             if (root.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
             {
-                var content = candidates[0].GetProperty("content");
-                if (content.TryGetProperty("parts", out var parts))
+                var candidate = candidates[0];
+
+                if (candidate.TryGetProperty("finishReason", out var fr))
+                    stopReason = fr.GetString() ?? "STOP";
+
+                if (candidate.TryGetProperty("content", out var content) &&
+                    content.TryGetProperty("parts", out var parts))
                 {
                     foreach (var part in parts.EnumerateArray())
                     {
                         if (part.TryGetProperty("text", out var text))
-                            yield return text.GetString() ?? "";
+                        {
+                            yield return new StreamText(text.GetString() ?? "");
+                        }
+                        else if (part.TryGetProperty("functionCall", out var fc))
+                        {
+                            var name = fc.GetProperty("name").GetString() ?? "";
+                            var callId = $"call_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Random.Shared.Next(1000, 9999)}";
+                            var argsJson = fc.TryGetProperty("args", out var args)
+                                ? args.GetRawText()
+                                : "{}";
+
+                            yield return new StreamToolUseStart(callId, name);
+                            yield return new StreamToolUseDelta(callId, argsJson);
+                            yield return new StreamToolUseEnd(callId);
+                        }
                     }
                 }
             }
         }
+
+        yield return new StreamMessageEnd(
+            new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens },
+            stopReason);
     }
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)

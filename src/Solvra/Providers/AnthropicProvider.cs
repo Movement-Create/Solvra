@@ -53,7 +53,7 @@ public sealed class AnthropicProvider : IProvider
         return ParseResponse(body);
     }
 
-    public async IAsyncEnumerable<string> StreamAsync(CompletionOptions options,
+    public async IAsyncEnumerable<StreamEvent> StreamAsync(CompletionOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = BuildRequest(options);
@@ -70,6 +70,12 @@ public sealed class AnthropicProvider : IProvider
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
+        // Track current content block for correlating deltas
+        var blockIds = new Dictionary<int, string>();    // index → tool_use id
+        var blockIsToolUse = new Dictionary<int, bool>(); // index → is tool_use block
+        string stopReason = "end_turn";
+        int inputTokens = 0, outputTokens = 0;
+
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             if (!line.StartsWith("data: ")) continue;
@@ -78,14 +84,95 @@ public sealed class AnthropicProvider : IProvider
 
             using var doc = JsonDocument.Parse(data);
             var root = doc.RootElement;
-            if (root.TryGetProperty("type", out var typeEl) &&
-                typeEl.GetString() == "content_block_delta" &&
-                root.TryGetProperty("delta", out var delta) &&
-                delta.TryGetProperty("type", out var deltaType) &&
-                deltaType.GetString() == "text_delta" &&
-                delta.TryGetProperty("text", out var text))
+            var eventType = root.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : null;
+
+            switch (eventType)
             {
-                yield return text.GetString() ?? "";
+                case "content_block_start":
+                {
+                    var index = root.GetProperty("index").GetInt32();
+                    if (root.TryGetProperty("content_block", out var block))
+                    {
+                        var blockType = block.TryGetProperty("type", out var bt) ? bt.GetString() : null;
+                        if (blockType == "tool_use")
+                        {
+                            var id = block.GetProperty("id").GetString() ?? "";
+                            var name = block.GetProperty("name").GetString() ?? "";
+                            blockIds[index] = id;
+                            blockIsToolUse[index] = true;
+                            yield return new StreamToolUseStart(id, name);
+                        }
+                        else
+                        {
+                            blockIsToolUse[index] = false;
+                        }
+                    }
+                    break;
+                }
+
+                case "content_block_delta":
+                {
+                    var index = root.TryGetProperty("index", out var idxEl) ? idxEl.GetInt32() : 0;
+                    if (root.TryGetProperty("delta", out var delta))
+                    {
+                        var deltaType = delta.TryGetProperty("type", out var dt) ? dt.GetString() : null;
+                        if (deltaType == "text_delta" && delta.TryGetProperty("text", out var text))
+                        {
+                            yield return new StreamText(text.GetString() ?? "");
+                        }
+                        else if (deltaType == "input_json_delta" && delta.TryGetProperty("partial_json", out var pj))
+                        {
+                            if (blockIds.TryGetValue(index, out var toolId))
+                            {
+                                yield return new StreamToolUseDelta(toolId, pj.GetString() ?? "");
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                case "content_block_stop":
+                {
+                    var index = root.TryGetProperty("index", out var idxEl) ? idxEl.GetInt32() : 0;
+                    if (blockIsToolUse.TryGetValue(index, out var isTool) && isTool && blockIds.TryGetValue(index, out var toolId))
+                    {
+                        yield return new StreamToolUseEnd(toolId);
+                    }
+                    break;
+                }
+
+                case "message_delta":
+                {
+                    if (root.TryGetProperty("delta", out var msgDelta))
+                    {
+                        if (msgDelta.TryGetProperty("stop_reason", out var sr))
+                            stopReason = sr.GetString() ?? "end_turn";
+                    }
+                    if (root.TryGetProperty("usage", out var usage))
+                    {
+                        if (usage.TryGetProperty("output_tokens", out var ot))
+                            outputTokens = ot.GetInt32();
+                    }
+                    break;
+                }
+
+                case "message_start":
+                {
+                    if (root.TryGetProperty("message", out var msg) && msg.TryGetProperty("usage", out var usage))
+                    {
+                        if (usage.TryGetProperty("input_tokens", out var it))
+                            inputTokens = it.GetInt32();
+                    }
+                    break;
+                }
+
+                case "message_stop":
+                {
+                    yield return new StreamMessageEnd(
+                        new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens },
+                        stopReason);
+                    break;
+                }
             }
         }
     }

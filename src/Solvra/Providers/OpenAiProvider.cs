@@ -55,7 +55,7 @@ public sealed class OpenAiProvider : IProvider
         return ParseResponse(body);
     }
 
-    public async IAsyncEnumerable<string> StreamAsync(CompletionOptions options,
+    public async IAsyncEnumerable<StreamEvent> StreamAsync(CompletionOptions options,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var request = BuildRequest(options);
@@ -71,6 +71,11 @@ public sealed class OpenAiProvider : IProvider
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
 
+        // Track tool calls by index for accumulation
+        var toolIds = new Dictionary<int, string>();       // index → tool call id
+        var toolStarted = new Dictionary<int, bool>();     // index → already emitted start?
+        int inputTokens = 0, outputTokens = 0;
+
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             if (!line.StartsWith("data: ")) continue;
@@ -79,13 +84,80 @@ public sealed class OpenAiProvider : IProvider
 
             using var doc = JsonDocument.Parse(data);
             var root = doc.RootElement;
-            if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+
+            // Check for usage in final chunk
+            if (root.TryGetProperty("usage", out var usageEl))
             {
-                var delta = choices[0].GetProperty("delta");
+                if (usageEl.TryGetProperty("prompt_tokens", out var pt)) inputTokens = pt.GetInt32();
+                if (usageEl.TryGetProperty("completion_tokens", out var ct2)) outputTokens = ct2.GetInt32();
+            }
+
+            if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+                continue;
+
+            var choice = choices[0];
+            var finishReason = choice.TryGetProperty("finish_reason", out var fr) && fr.ValueKind == JsonValueKind.String
+                ? fr.GetString()
+                : null;
+
+            if (choice.TryGetProperty("delta", out var delta))
+            {
+                // Text content
                 if (delta.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
                 {
-                    yield return content.GetString() ?? "";
+                    var text = content.GetString();
+                    if (!string.IsNullOrEmpty(text))
+                        yield return new StreamText(text);
                 }
+
+                // Tool calls
+                if (delta.TryGetProperty("tool_calls", out var toolCalls))
+                {
+                    foreach (var tc in toolCalls.EnumerateArray())
+                    {
+                        var index = tc.GetProperty("index").GetInt32();
+
+                        // First appearance: has id and function.name
+                        if (tc.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String)
+                        {
+                            var id = idEl.GetString() ?? $"call_{index}";
+                            toolIds[index] = id;
+
+                            if (tc.TryGetProperty("function", out var func) &&
+                                func.TryGetProperty("name", out var nameEl))
+                            {
+                                yield return new StreamToolUseStart(id, nameEl.GetString() ?? "");
+                                toolStarted[index] = true;
+                            }
+                        }
+
+                        // Arguments fragment
+                        if (tc.TryGetProperty("function", out var funcDelta) &&
+                            funcDelta.TryGetProperty("arguments", out var argsEl) &&
+                            argsEl.ValueKind == JsonValueKind.String)
+                        {
+                            var fragment = argsEl.GetString() ?? "";
+                            if (!string.IsNullOrEmpty(fragment) && toolIds.TryGetValue(index, out var toolId))
+                            {
+                                yield return new StreamToolUseDelta(toolId, fragment);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Finish reason
+            if (finishReason != null)
+            {
+                // Emit end for all accumulated tool calls
+                foreach (var (index, id) in toolIds)
+                {
+                    yield return new StreamToolUseEnd(id);
+                }
+
+                yield return new StreamMessageEnd(
+                    new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens },
+                    finishReason);
             }
         }
     }

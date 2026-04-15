@@ -30,7 +30,7 @@ public sealed class MoonshotProvider : IProvider
     public Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)
         => _inner.CompleteAsync(options, ct);
 
-    public IAsyncEnumerable<string> StreamAsync(CompletionOptions options, CancellationToken ct = default)
+    public IAsyncEnumerable<StreamEvent> StreamAsync(CompletionOptions options, CancellationToken ct = default)
         => _inner.StreamAsync(options, ct);
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)

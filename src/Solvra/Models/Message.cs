@@ -119,7 +119,7 @@ public record ToolCall
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
-    public required Dictionary<string, JsonElement> Input { get; init; }
+    public required Dictionary<string, JsonElement> Input { get; set; }
 }
 
 public record ToolResult
