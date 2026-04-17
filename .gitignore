@@ -7,9 +7,9 @@ obj/
 *.user
 *.suo
 *.vs/
-.vscode/
 
 ## IDE
+.vscode/
 *.swp
 *.sln.docstates
 .idea/
@@ -23,9 +23,19 @@ publish/
 *.nupkg
 packages/
 
-## Sessions
+## Sessions & logs
 sessions/
 memory/
+logs/
+
+## VSCode extension
+vscode-extension/node_modules/
+vscode-extension/dist/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+## Claude Code
+.claude/
 
 ## OS
 .DS_Store
