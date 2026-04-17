@@ -60,6 +60,7 @@
       { "command": "solvra.explainInChat", "title": "Solvra: Explain", "category": "Solvra" },
       { "command": "solvra.fixInChat", "title": "Solvra: Fix", "category": "Solvra" },
       { "command": "solvra.askSolvra", "title": "Solvra: Ask Solvra", "category": "Solvra" },
+      { "command": "solvra.openChatInTab", "title": "Open Chat in Editor Tab", "category": "Solvra", "icon": "$(link-external)" },
       { "command": "solvra.newSession", "title": "New Session", "category": "Solvra", "icon": "$(add)" },
       { "command": "solvra.refreshSessions", "title": "Refresh Sessions", "category": "Solvra", "icon": "$(refresh)" },
       { "command": "solvra.openSession", "title": "Open Session", "category": "Solvra" },

@@ -258,7 +258,11 @@ export class AgentRunner {
     const mode = options.mode || this._config.mode || 'auto';
     const auto = options.auto !== undefined ? options.auto : config.autoApprove;
 
-    const { dotnet, dll, cwd } = this.resolveInvocation();
+    const { dotnet, dll } = this.resolveInvocation();
+
+    // Use the user's workspace as the working directory, not the Solvra installation
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const cwd = workspaceFolder || os.homedir();
 
     const args: string[] = [
       dll,

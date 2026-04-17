@@ -29,7 +29,7 @@ public class SpreadsheetCreateTool : ToolBase
                     {
                         name = new { type = "string" },
                         headers = new { type = "array", items = new { type = "string" } },
-                        rows = new { type = "array", items = new { type = "array" } }
+                        rows = new { type = "array", items = new { type = "array", items = new { type = "string" } } }
                     }
                 }
             }

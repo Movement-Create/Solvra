@@ -17,6 +17,10 @@ public sealed class MoonshotProvider : IProvider
         ["moonshot-v1-8k"] = (1m, 2m),
         ["moonshot-v1-32k"] = (2m, 4m),
         ["moonshot-v1-128k"] = (6m, 12m),
+        ["kimi-k2.5"] = (2m, 8m),
+        ["kimi-k2-thinking"] = (2m, 8m),
+        ["kimi-k2-turbo-preview"] = (1m, 4m),
+        ["kimi-k2-thinking-turbo"] = (1m, 4m),
     };
 
     private static readonly (decimal Input, decimal Output) DefaultPricing = (2m, 4m);
@@ -24,7 +28,7 @@ public sealed class MoonshotProvider : IProvider
     public MoonshotProvider(HttpClient? http = null, string? apiKey = null)
     {
         var key = apiKey ?? Environment.GetEnvironmentVariable("MOONSHOT_API_KEY") ?? "";
-        _inner = new OpenAiProvider(http, key, "https://api.moonshot.cn/v1");
+        _inner = new OpenAiProvider(http, key, "https://api.moonshot.ai/v1");
     }
 
     public Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)
@@ -34,7 +38,7 @@ public sealed class MoonshotProvider : IProvider
         => _inner.StreamAsync(options, ct);
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
-        => ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"];
+        => ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview", "kimi-k2-thinking-turbo", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"];
 
     public async Task<bool> ValidateAsync(CancellationToken ct = default)
     {

@@ -19,7 +19,7 @@ public class CsvWriteTool : ToolBase
         {
             output_path = new { type = "string", description = "Output file path" },
             headers = new { type = "array", items = new { type = "string" }, description = "Column headers" },
-            rows = new { type = "array", items = new { type = "array" }, description = "Row data (array of arrays)" }
+            rows = new { type = "array", items = new { type = "array", items = new { type = "string" } }, description = "Row data (array of arrays)" }
         },
         required = new[] { "output_path", "headers", "rows" }
     });

@@ -67,7 +67,12 @@ public sealed class GoogleProvider : IProvider
         httpRequest.Content = JsonContent.Create(request);
 
         using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException($"Google API error {(int)response.StatusCode}: {errorBody}",
+                null, response.StatusCode);
+        }
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

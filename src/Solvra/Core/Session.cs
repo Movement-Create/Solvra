@@ -64,6 +64,7 @@ public sealed class SessionManager
 
     public async Task AppendEventAsync(SessionConfig session, SessionEvent evt)
     {
+        if (string.IsNullOrEmpty(session.FilePath)) return;
         var line = JsonSerializer.Serialize(evt, JsonOptions) + "\n";
         await File.AppendAllTextAsync(session.FilePath, line);
     }

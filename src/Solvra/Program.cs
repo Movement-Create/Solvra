@@ -62,12 +62,22 @@ public static class Program
 
             var config = await ConfigLoader.LoadAsync();
 
+            // When provider is explicitly set but model is not, pick the default model for that provider
+            // to avoid model/provider mismatch (e.g. claude model with google provider)
+            var resolvedProvider = provider ?? config.Provider;
+            var resolvedModel = model ?? config.Model;
+            if (provider != null && model == null && ModelRouter.DetectProvider(resolvedModel) is string detectedProvider && detectedProvider != resolvedProvider)
+            {
+                var resolvedEffort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort;
+                resolvedModel = ModelRouter.GetEffortModel(resolvedProvider, resolvedEffort);
+            }
+
             var sessionConfig = new SessionConfig
             {
                 Id = Guid.NewGuid().ToString(),
                 CreatedAt = DateTime.UtcNow.ToString("o"),
-                Model = model ?? config.Model,
-                Provider = provider ?? config.Provider,
+                Model = resolvedModel,
+                Provider = resolvedProvider,
                 PermissionMode = plan ? "plan" : (auto ? "auto" : config.PermissionMode),
                 Effort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort,
                 MaxTurns = maxTurns ?? 20,
@@ -217,12 +227,21 @@ public static class Program
             }
             else
             {
+                // When provider is explicitly set but model is not, pick the default model for that provider
+                var chatProvider = provider ?? config.Provider;
+                var chatModel = model ?? config.Model;
+                if (provider != null && model == null && ModelRouter.DetectProvider(chatModel) is string detectedChatProvider && detectedChatProvider != chatProvider)
+                {
+                    var chatEffort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort;
+                    chatModel = ModelRouter.GetEffortModel(chatProvider, chatEffort);
+                }
+
                 sessionConfig = await sessionMgr.CreateAsync(new SessionConfig
                 {
                     Id = Guid.NewGuid().ToString(),
                     CreatedAt = DateTime.UtcNow.ToString("o"),
-                    Model = model ?? config.Model,
-                    Provider = provider ?? config.Provider,
+                    Model = chatModel,
+                    Provider = chatProvider,
                     PermissionMode = auto ? "auto" : config.PermissionMode,
                     Effort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort,
                     MaxTurns = maxTurns ?? config.MaxTurns,

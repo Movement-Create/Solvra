@@ -15,7 +15,7 @@ public sealed class ModelRouter
         (new Regex(@"^o1", RegexOptions.IgnoreCase | RegexOptions.Compiled), "openai"),
         (new Regex(@"^gemini-", RegexOptions.IgnoreCase | RegexOptions.Compiled), "google"),
         (new Regex(@"^(llama|mistral|codellama|phi|qwen)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "ollama"),
-        (new Regex(@"^moonshot-", RegexOptions.IgnoreCase | RegexOptions.Compiled), "moonshot"),
+        (new Regex(@"^(moonshot-|kimi)", RegexOptions.IgnoreCase | RegexOptions.Compiled), "moonshot"),
     ];
 
     private static readonly Dictionary<string, Dictionary<EffortLevel, string>> EffortModels = new()
