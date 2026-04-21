@@ -30,6 +30,7 @@ export function getChatHtml(
 
   const cssFile = version === 'v2' ? 'chat-v2.css' : 'chat.css';
   const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', cssFile));
+  const fontsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'solvra-fonts.css'));
   const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chat.js'));
   const v2JsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chat-v2.js'));
   const crestUri = webview.asWebviewUri(
@@ -37,7 +38,7 @@ export function getChatHtml(
   );
 
   if (version === 'v2') {
-    return v2Html({ webview, nonce, cssUri, jsUri, v2JsUri, crestUri });
+    return v2Html({ webview, nonce, cssUri, fontsUri, jsUri, v2JsUri, crestUri });
   }
   return legacyHtml({ webview, nonce, cssUri, jsUri });
 }
@@ -48,18 +49,20 @@ function v2Html(p: {
   webview: vscode.Webview;
   nonce: string;
   cssUri: vscode.Uri;
+  fontsUri: vscode.Uri;
   jsUri: vscode.Uri;
   v2JsUri: vscode.Uri;
   crestUri: vscode.Uri;
 }): string {
-  const { webview, nonce, cssUri, jsUri, v2JsUri, crestUri } = p;
+  const { webview, nonce, cssUri, fontsUri, jsUri, v2JsUri, crestUri } = p;
   return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  content="default-src 'none'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${fontsUri}">
 <link rel="stylesheet" href="${cssUri}">
 </head>
 <body data-ui-version="v2">

@@ -25,9 +25,9 @@
   --error-fg: var(--vscode-errorForeground, #f44);
   --code-bg: var(--vscode-textCodeBlock-background, rgba(0,0,0,0.25));
   --link: var(--vscode-textLink-foreground, #4fc1ff);
-  --font: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font: 'Inter', var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
   --font-size: var(--vscode-font-size, 13px);
-  --mono: var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', Consolas, monospace);
+  --mono: 'JetBrains Mono', var(--vscode-editor-font-family, 'Cascadia Code', 'Fira Code', Consolas, monospace);
   --badge-bg: var(--vscode-badge-background, rgba(255,255,255,0.08));
   --hover-bg: var(--vscode-list-hoverBackground, rgba(255,255,255,0.06));
   --focus-border: var(--vscode-focusBorder, #0078d4);

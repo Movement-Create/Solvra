@@ -30,13 +30,15 @@ export function getChatHtml(
 
   const cssFile = version === 'v2' ? 'chat-v2.css' : 'chat.css';
   const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', cssFile));
+  const fontsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'solvra-fonts.css'));
   const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chat.js'));
+  const v2JsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'chat-v2.js'));
   const crestUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'resources', 'solvra-crest.svg')
   );
 
   if (version === 'v2') {
-    return v2Html({ webview, nonce, cssUri, jsUri, crestUri });
+    return v2Html({ webview, nonce, cssUri, fontsUri, jsUri, v2JsUri, crestUri });
   }
   return legacyHtml({ webview, nonce, cssUri, jsUri });
 }
@@ -47,17 +49,20 @@ function v2Html(p: {
   webview: vscode.Webview;
   nonce: string;
   cssUri: vscode.Uri;
+  fontsUri: vscode.Uri;
   jsUri: vscode.Uri;
+  v2JsUri: vscode.Uri;
   crestUri: vscode.Uri;
 }): string {
-  const { webview, nonce, cssUri, jsUri, crestUri } = p;
+  const { webview, nonce, cssUri, fontsUri, jsUri, v2JsUri, crestUri } = p;
   return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  content="default-src 'none'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<link rel="stylesheet" href="${fontsUri}">
 <link rel="stylesheet" href="${cssUri}">
 </head>
 <body data-ui-version="v2">
@@ -113,20 +118,37 @@ function v2Html(p: {
     <div id="autocomplete"></div>
     <div id="input-area">
       <div id="input-container">
-        <textarea id="input" rows="1" placeholder="Ask Solvra… (/ for commands, @ for files)"></textarea>
+        <textarea id="input" rows="1" placeholder="Follow up…"></textarea>
         <div id="input-footer">
           <span>Shift+Enter for new line</span>
           <span id="char-count"></span>
         </div>
+        <button class="action-btn" id="send-btn" title="Send (Enter)" aria-label="Send">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.75.75 0 01.53.22l4.5 4.5a.75.75 0 01-1.06 1.06L8.75 4.06v9.69a.75.75 0 01-1.5 0V4.06L4.03 7.28A.75.75 0 012.97 6.22l4.5-4.5A.75.75 0 018 1.5z"/></svg>
+        </button>
+        <button class="action-btn" id="cancel-btn" title="Stop" aria-label="Stop">
+          <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+        </button>
       </div>
-      <button class="action-btn" id="send-btn" title="Send (Enter)">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.724 1.053a.5.5 0 01.555-.033l12 7a.5.5 0 010 .86l-12 7A.5.5 0 011.5 15.5V.5a.5.5 0 01.224-.447zM3 2.31v4.19h4.5a.5.5 0 010 1H3v4.19l9.144-4.69L3 2.31z"/></svg>
-        Send
-      </button>
-      <button class="action-btn" id="cancel-btn" title="Stop">
-        <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
-        Stop
-      </button>
+
+      <!-- Model / mode pill row -->
+      <div id="composer-pills">
+        <button class="composer-pill accent" id="mode-pill" title="Switch mode" type="button">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5l5.5 3.25v6.5L8 14.5 2.5 11.25v-6.5L8 1.5zM4 6.15v4.2L8 12.7l4-2.35v-4.2L8 3.8 4 6.15z"/></svg>
+          <span data-mode-label>agent</span>
+          <span class="chev">▾</span>
+        </button>
+        <button class="composer-pill" id="model-pill" title="Switch model" type="button">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5"/></svg>
+          <span data-model-label>sonnet-4</span>
+          <span class="chev">▾</span>
+        </button>
+        <span class="composer-pill-spacer"></span>
+        <button class="composer-pill" id="attach-pill" title="Attach file (@)" type="button">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M10.5 3.5l-5 5a2.5 2.5 0 003.54 3.54l5-5a4 4 0 00-5.66-5.66l-5.5 5.5a.5.5 0 00.71.71l5.5-5.5a3 3 0 014.24 4.24l-5 5a1.5 1.5 0 01-2.12-2.12l5-5a.5.5 0 00-.71-.71z"/></svg>
+          <span>Attach</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -134,6 +156,7 @@ function v2Html(p: {
   <link rel="preload" as="image" href="${crestUri}">
 
 <script nonce="${nonce}" src="${jsUri}"></script>
+<script nonce="${nonce}" src="${v2JsUri}"></script>
 </body>
 </html>`;
 }

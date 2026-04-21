@@ -119,6 +119,38 @@ Reload. Everything should look identical (flag is `legacy`).
 
 ---
 
+## Phase 4b — Branded composer extras (CONTEXT label, model pills, capsule input)
+
+Adds the three elements from the reference screenshot that the baseline v2 was
+missing. Self-contained; depends only on Phase 4.
+
+```bash
+cp path/to/migration/media/chat-v2.js vscode-extension/media/
+# Overwrite the earlier copies with the updated versions:
+cp path/to/migration/media/chat-v2.css vscode-extension/media/
+cp path/to/migration/src/chat-html.ts  vscode-extension/src/
+git add vscode-extension/media/chat-v2.js vscode-extension/media/chat-v2.css vscode-extension/src/chat-html.ts
+git commit -m "design(v2): CONTEXT ATTACHED label, model/mode pills, capsule composer"
+```
+
+What this adds:
+- **`CONTEXT ATTACHED`** pill-label row above file chips — auto-shows when
+  chips exist, auto-hides when empty. No chat.js changes; it's wired via a
+  MutationObserver in chat-v2.js.
+- **Model + mode pill row** under the composer (`agent` / `sonnet-4` / `Attach`).
+  Click cycles values, persists to localStorage, and posts `{type:'setMode'}`
+  / `{type:'setModel'}` to the extension host. Host can ignore these messages
+  for now — the UI still works locally.
+- **Capsule composer** — rounded input with the send button inline (absolute)
+  on the right instead of as a sibling. Amber focus ring.
+
+If you want the host to actually respect model/mode selection, add handlers
+in `chat-provider.ts`'s `onDidReceiveMessage` for `setMode` and `setModel`
+and thread them into your provider call. That's optional — ship the visual
+first.
+
+---
+
 ## Phase 5 — Preview the new UI locally
 
 Add this to your user settings (File → Preferences → Settings → JSON):

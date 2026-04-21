@@ -91,6 +91,13 @@ export class SessionPanelManager {
       if (e.affectsConfiguration('solvra.ui.version')) {
         panel.webview.html = this._getHtml(panel.webview, title);
       }
+      if (e.affectsConfiguration('solvra.model')) {
+        const cfg = vscode.workspace.getConfiguration('solvra');
+        panel.webview.postMessage({
+          type: 'modelChanged',
+          value: cfg.get<string>('model', 'gemini-2.5-flash'),
+        });
+      }
     });
 
     panel.onDidDispose(() => {
@@ -133,6 +140,30 @@ export class SessionPanelManager {
         case 'attachFile':
           pendingFiles.set(message.path, { relative: message.relative, content: message.content });
           break;
+        case 'setModel': {
+          const model = String(message.value || '').trim();
+          if (!model) break;
+          const provider = detectProviderForModel(model);
+          this._runner.setConfig(provider ? { model, provider } : { model });
+          await vscode.workspace
+            .getConfiguration('solvra')
+            .update('model', model, vscode.ConfigurationTarget.Global);
+          break;
+        }
+        case 'setMode':
+          // UI-only — no 'mode' concept in AgentRunner yet.
+          break;
+        case 'pickModel':
+          vscode.commands.executeCommand('solvra.pickModel');
+          break;
+        case 'requestInitPills': {
+          const cfg = vscode.workspace.getConfiguration('solvra');
+          panel.webview.postMessage({
+            type: 'initPills',
+            model: cfg.get<string>('model', 'gemini-2.5-flash'),
+          });
+          break;
+        }
       }
     });
   }
@@ -324,4 +355,13 @@ function generateId(): string {
     id += chars[Math.floor(Math.random() * chars.length)];
   }
   return id;
+}
+
+function detectProviderForModel(model: string): string | null {
+  if (/^claude-/i.test(model)) return 'anthropic';
+  if (/^gpt-|^o[13]/i.test(model)) return 'openai';
+  if (/^gemini-/i.test(model)) return 'google';
+  if (/^(llama|mistral|codellama|phi|qwen)/i.test(model)) return 'ollama';
+  if (/^(moonshot-|kimi)/i.test(model)) return 'moonshot';
+  return null;
 }

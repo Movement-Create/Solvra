@@ -11,14 +11,42 @@ export interface SessionMeta {
   status: 'done' | 'running' | 'errored';
 }
 
-const RECENT_LIMIT = 5;
-
 export interface ReplayMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
-type SessionNode = SessionTreeItem | ShowAllTreeItem;
+type Bucket = 'today' | 'yesterday' | 'week' | 'earlier';
+
+const BUCKET_LABEL: Record<Bucket, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  week: 'This week',
+  earlier: 'Earlier',
+};
+
+const BUCKET_ORDER: Bucket[] = ['today', 'yesterday', 'week', 'earlier'];
+
+function bucketOf(iso: string): Bucket {
+  const ts = new Date(iso).getTime();
+  if (!ts) return 'earlier';
+  const now = new Date();
+  const d = new Date(ts);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, now)) return 'today';
+  if (sameDay(d, yesterday)) return 'yesterday';
+  const weekAgo = new Date(now);
+  weekAgo.setDate(now.getDate() - 7);
+  if (d >= weekAgo) return 'week';
+  return 'earlier';
+}
+
+type SessionNode = SessionTreeItem | SessionBucketItem;
 
 export class SessionsProvider implements vscode.TreeDataProvider<SessionNode> {
   public static readonly viewType = 'solvra.sessionsView';
@@ -27,7 +55,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionNode> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private _activeSessionId: string | null = null;
-  private _showAll = false;
+  private _showAll = true;
 
   constructor(private runner: AgentRunner) {}
 
@@ -37,6 +65,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionNode> {
   }
 
   toggleShowAll(): void {
+    // Buckets always render; kept for backward-compatible command binding.
     this._showAll = !this._showAll;
     this.refresh();
   }
@@ -49,17 +78,28 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionNode> {
     return element;
   }
 
-  async getChildren(): Promise<SessionNode[]> {
+  async getChildren(element?: SessionNode): Promise<SessionNode[]> {
     const sessions = this.listSessionsFromDisk();
-    const items: SessionNode[] = [];
-    const visible = this._showAll ? sessions : sessions.slice(0, RECENT_LIMIT);
-    for (const s of visible) {
-      items.push(new SessionTreeItem(s, s.id === this._activeSessionId));
+    if (sessions.length === 0) return [];
+
+    if (!element) {
+      const grouped = new Map<Bucket, SessionMeta[]>();
+      for (const s of sessions) {
+        const b = bucketOf(s.created_at);
+        if (!grouped.has(b)) grouped.set(b, []);
+        grouped.get(b)!.push(s);
+      }
+      return BUCKET_ORDER
+        .filter(b => grouped.get(b)?.length)
+        .map(b => new SessionBucketItem(b, BUCKET_LABEL[b], grouped.get(b)!.length));
     }
-    if (!this._showAll && sessions.length > RECENT_LIMIT) {
-      items.push(new ShowAllTreeItem(sessions.length - RECENT_LIMIT));
+
+    if (element instanceof SessionBucketItem) {
+      return sessions
+        .filter(s => bucketOf(s.created_at) === element.bucket)
+        .map(s => new SessionTreeItem(s, s.id === this._activeSessionId));
     }
-    return items;
+    return [];
   }
 
   listSessionsFromDisk(): SessionMeta[] {
@@ -199,7 +239,9 @@ export class SessionTreeItem extends vscode.TreeItem {
   constructor(public readonly meta: SessionMeta, isActive: boolean) {
     super(meta.title, vscode.TreeItemCollapsibleState.None);
     this.id = meta.id;
-    this.tooltip = `${meta.title}\n${meta.created_at}\n${meta.id}`;
+    this.tooltip = new vscode.MarkdownString(
+      `**${meta.title || 'Untitled'}**\n\n_${new Date(meta.created_at).toLocaleString()}_\n\n\`${meta.id}\``
+    );
     this.description = relativeTime(meta.created_at);
     this.contextValue = 'solvraSession';
     this.iconPath = iconForStatus(meta.status, isActive);
@@ -211,16 +253,15 @@ export class SessionTreeItem extends vscode.TreeItem {
   }
 }
 
-export class ShowAllTreeItem extends vscode.TreeItem {
-  constructor(hiddenCount: number) {
-    super(`Show all (${hiddenCount} more)`, vscode.TreeItemCollapsibleState.None);
-    this.id = '__solvra_show_all__';
-    this.iconPath = new vscode.ThemeIcon('ellipsis');
-    this.contextValue = 'solvraShowAll';
-    this.command = {
-      command: 'solvra.toggleShowAllSessions',
-      title: 'Show All Sessions',
-    };
+export class SessionBucketItem extends vscode.TreeItem {
+  constructor(
+    public readonly bucket: Bucket,
+    label: string,
+    count: number
+  ) {
+    super(`${label}  ·  ${count}`, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `__solvra_bucket_${bucket}__`;
+    this.contextValue = 'solvraSessionBucket';
   }
 }
 

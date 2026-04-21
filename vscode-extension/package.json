@@ -69,7 +69,8 @@
       { "command": "solvra.toggleShowAllSessions", "title": "Toggle Show All Sessions", "category": "Solvra" },
       { "command": "solvra.focusInput", "title": "Focus Chat Input", "category": "Solvra" },
       { "command": "solvra.toggleThinking", "title": "Toggle Thinking Blocks", "category": "Solvra" },
-      { "command": "solvra.clearSession", "title": "Clear Current Session", "category": "Solvra" }
+      { "command": "solvra.clearSession", "title": "Clear Current Session", "category": "Solvra" },
+      { "command": "solvra.pickModel", "title": "Solvra: Pick Model", "category": "Solvra", "icon": "$(sparkle)" }
     ],
     "menus": {
       "view/title": [
@@ -96,7 +97,8 @@
       { "command": "solvra.newSession", "key": "ctrl+shift+n", "mac": "cmd+shift+n", "when": "focusedView == solvra.chatView || focusedView == solvra.sessionsView" },
       { "command": "solvra.focusInput", "key": "ctrl+l", "mac": "cmd+l", "when": "focusedView == solvra.chatView" },
       { "command": "solvra.toggleThinking", "key": "ctrl+shift+t", "mac": "cmd+shift+t", "when": "focusedView == solvra.chatView" },
-      { "command": "solvra.clearSession", "key": "ctrl+shift+k", "mac": "cmd+shift+k", "when": "focusedView == solvra.chatView" }
+      { "command": "solvra.clearSession", "key": "ctrl+shift+k", "mac": "cmd+shift+k", "when": "focusedView == solvra.chatView" },
+      { "command": "solvra.pickModel", "key": "ctrl+k m", "mac": "cmd+k m" }
     ],
     "configuration": {
       "title": "Solvra",

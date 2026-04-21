@@ -73,12 +73,44 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
             history: this._history,
           });
           break;
+        case 'setModel': {
+          const model = String(message.value || '').trim();
+          if (!model) break;
+          const provider = this._detectProviderForModel(model);
+          this._runner.setConfig(provider ? { model, provider } : { model });
+          await vscode.workspace
+            .getConfiguration('solvra')
+            .update('model', model, vscode.ConfigurationTarget.Global);
+          break;
+        }
+        case 'setMode':
+          // UI-only for now — no 'mode' concept in AgentRunner. The webview
+          // persists the selection in localStorage.
+          break;
+        case 'pickModel':
+          vscode.commands.executeCommand('solvra.pickModel');
+          break;
+        case 'requestInitPills': {
+          const cfg = vscode.workspace.getConfiguration('solvra');
+          this._postMessage({
+            type: 'initPills',
+            model: cfg.get<string>('model', 'gemini-2.5-flash'),
+          });
+          break;
+        }
       }
     });
 
     const cfgSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('solvra.ui.version') && this._view) {
         this._view.webview.html = this._getHtml(this._view.webview);
+      }
+      if (e.affectsConfiguration('solvra.model')) {
+        const cfg = vscode.workspace.getConfiguration('solvra');
+        this._postMessage({
+          type: 'modelChanged',
+          value: cfg.get<string>('model', 'gemini-2.5-flash'),
+        });
       }
     });
     webviewView.onDidDispose(() => cfgSub.dispose());
