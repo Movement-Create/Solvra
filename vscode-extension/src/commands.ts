@@ -181,21 +181,22 @@ export function registerCommands(
 
   register('solvra.askSolvra', async () => {
     const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
-    const selection = editor.document.getText(editor.selection);
-    if (!selection) {
-      vscode.window.showWarningMessage('No text selected.');
+    if (!editor) {
+      vscode.window.showWarningMessage('No active editor.');
       return;
     }
+    const selection = editor.document.getText(editor.selection);
+    const code = selection || editor.document.getText();
+    const scope = selection ? 'selection' : 'file';
     const question = await vscode.window.showInputBox({
-      title: 'Solvra: Ask about selection',
-      prompt: 'What would you like to know about this code?',
+      title: `Solvra: Ask about ${scope}`,
+      prompt: `What would you like to know about this ${scope === 'file' ? 'file' : 'code'}?`,
       placeHolder: 'e.g. How can I optimize this?',
     });
     if (!question) return;
 
     const lang = editor.document.languageId;
-    const prompt = `${question}\n\n\`\`\`${lang}\n${selection}\n\`\`\``;
+    const prompt = `${question}\n\n\`\`\`${lang}\n${code}\n\`\`\``;
     await chatProvider.sendPrompt(prompt);
   });
 

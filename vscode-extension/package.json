@@ -59,7 +59,7 @@
       { "command": "solvra.searchMemory", "title": "Search Memory", "category": "Solvra" },
       { "command": "solvra.explainInChat", "title": "Solvra: Explain", "category": "Solvra" },
       { "command": "solvra.fixInChat", "title": "Solvra: Fix", "category": "Solvra" },
-      { "command": "solvra.askSolvra", "title": "Solvra: Ask Solvra", "category": "Solvra" },
+      { "command": "solvra.askSolvra", "title": "Solvra: Ask Solvra", "category": "Solvra", "icon": "resources/solvra-crest.svg" },
       { "command": "solvra.openChatInTab", "title": "Open Chat in Editor Tab", "category": "Solvra", "icon": "$(link-external)" },
       { "command": "solvra.newSession", "title": "New Session", "category": "Solvra", "icon": "$(add)" },
       { "command": "solvra.refreshSessions", "title": "Refresh Sessions", "category": "Solvra", "icon": "$(refresh)" },
@@ -84,10 +84,14 @@
         { "command": "solvra.explainInChat", "when": "editorHasSelection", "group": "solvra@1" },
         { "command": "solvra.fixInChat", "when": "editorHasSelection", "group": "solvra@2" },
         { "command": "solvra.askSolvra", "when": "editorHasSelection", "group": "solvra@3" }
+      ],
+      "editor/title": [
+        { "command": "solvra.askSolvra", "group": "navigation", "when": "resourceScheme == file" }
       ]
     },
     "keybindings": [
       { "command": "solvra.openChat", "key": "ctrl+shift+a", "mac": "cmd+shift+a" },
+      { "command": "solvra.askSolvra", "key": "alt+ctrl+s", "mac": "alt+cmd+s" },
       { "command": "solvra.runPrompt", "key": "ctrl+shift+r", "mac": "cmd+shift+r" },
       { "command": "solvra.newSession", "key": "ctrl+shift+n", "mac": "cmd+shift+n", "when": "focusedView == solvra.chatView || focusedView == solvra.sessionsView" },
       { "command": "solvra.focusInput", "key": "ctrl+l", "mac": "cmd+l", "when": "focusedView == solvra.chatView" },
@@ -97,6 +101,16 @@
     "configuration": {
       "title": "Solvra",
       "properties": {
+        "solvra.ui.version": {
+          "type": "string",
+          "default": "legacy",
+          "enum": ["legacy", "v2"],
+          "enumDescriptions": [
+            "Current chat UI",
+            "New crest-branded UI (preview)"
+          ],
+          "description": "Which chat UI to render. Flip to v2 to preview the new design."
+        },
         "solvra.provider": {
           "type": "string",
           "default": "google",
