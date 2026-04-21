@@ -25,7 +25,7 @@
         {
           "id": "solvra-sidebar",
           "title": "Solvra",
-          "icon": "resources/icon.svg"
+          "icon": "resources/solvra-crest.svg"
         }
       ]
     },
@@ -35,14 +35,14 @@
           "type": "tree",
           "id": "solvra.sessionsView",
           "name": "Sessions",
-          "icon": "resources/icon.svg",
+          "icon": "resources/solvra-crest.svg",
           "contextualTitle": "Solvra Sessions"
         },
         {
           "type": "webview",
           "id": "solvra.chatView",
           "name": "Chat",
-          "icon": "resources/icon.svg",
+          "icon": "resources/solvra-crest.svg",
           "contextualTitle": "Solvra"
         }
       ]
