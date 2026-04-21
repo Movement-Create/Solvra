@@ -103,13 +103,13 @@
       "properties": {
         "solvra.ui.version": {
           "type": "string",
-          "default": "legacy",
+          "default": "v2",
           "enum": ["legacy", "v2"],
           "enumDescriptions": [
-            "Current chat UI",
-            "New crest-branded UI (preview)"
+            "Previous chat UI",
+            "Current crest-branded UI"
           ],
-          "description": "Which chat UI to render. Flip to v2 to preview the new design."
+          "description": "Which chat UI to render. Set to legacy to fall back to the previous design."
         },
         "solvra.provider": {
           "type": "string",
