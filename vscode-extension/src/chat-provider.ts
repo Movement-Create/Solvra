@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AgentRunner } from './agent-runner';
 import { SolvraStatusBar } from './status-bar';
 import { SessionsProvider } from './sessions-provider';
+import { getChatHtml, UiVersion } from './chat-html';
 
 export class SolvraChatProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'solvra.chatView';
@@ -72,8 +73,47 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
             history: this._history,
           });
           break;
+        case 'setModel': {
+          const model = String(message.value || '').trim();
+          if (!model) break;
+          const provider = this._detectProviderForModel(model);
+          this._runner.setConfig(provider ? { model, provider } : { model });
+          await vscode.workspace
+            .getConfiguration('solvra')
+            .update('model', model, vscode.ConfigurationTarget.Global);
+          break;
+        }
+        case 'setMode':
+          // UI-only for now — no 'mode' concept in AgentRunner. The webview
+          // persists the selection in localStorage.
+          break;
+        case 'pickModel':
+          vscode.commands.executeCommand('solvra.pickModel');
+          break;
+        case 'requestInitPills': {
+          const cfg = vscode.workspace.getConfiguration('solvra');
+          this._postMessage({
+            type: 'initPills',
+            model: cfg.get<string>('model', 'gemini-2.5-flash'),
+          });
+          break;
+        }
       }
     });
+
+    const cfgSub = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('solvra.ui.version') && this._view) {
+        this._view.webview.html = this._getHtml(this._view.webview);
+      }
+      if (e.affectsConfiguration('solvra.model')) {
+        const cfg = vscode.workspace.getConfiguration('solvra');
+        this._postMessage({
+          type: 'modelChanged',
+          value: cfg.get<string>('model', 'gemini-2.5-flash'),
+        });
+      }
+    });
+    webviewView.onDidDispose(() => cfgSub.dispose());
   }
 
   /** Send a prefilled prompt to the chat (used by explainInChat, fixInChat, askSolvra). */
@@ -441,97 +481,9 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
   }
 
   private _getHtml(webview: vscode.Webview): string {
-    const nonce = getNonce();
-    const cssUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'media', 'chat.css')
-    );
-    const jsUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'media', 'chat.js')
-    );
-
-    return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${cssUri}">
-</head>
-<body>
-  <!-- Header -->
-  <div id="header">
-    <div id="header-left">Solvra</div>
-    <div id="header-right">
-      <button class="header-btn" id="new-session-btn" title="New Session">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
-      </button>
-      <button class="header-btn" id="open-tab-btn" title="Open in Editor Tab">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 1h9A1.5 1.5 0 0114 2.5v11a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 13.5v-11A1.5 1.5 0 013.5 1zm0 1a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h9a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5h-9zM5 4h6v1.5H5V4z"/><path d="M10.854 7.146a.5.5 0 010 .708l-3 3a.5.5 0 01-.708-.708l3-3a.5.5 0 01.708 0z"/><path d="M7.146 7.146a.5.5 0 01.708 0l3 3a.5.5 0 01-.708.708l-3-3a.5.5 0 010-.708z"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <!-- Messages area -->
-  <div id="messages">
-    <div class="empty-state" id="empty-state">
-      <div class="empty-state-icon">S</div>
-      <div class="empty-state-title">What can I help you with?</div>
-      <div class="empty-state-subtitle">Ask questions, write code, debug issues, or explore your codebase.</div>
-      <div class="empty-state-hints">
-        <span><kbd>/</kbd> for commands</span>
-        <span><kbd>@</kbd> to attach files</span>
-        <span><kbd>Shift+Enter</kbd> for new line</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Progress indicator -->
-  <div class="progress-container" id="progress">
-    <div class="progress-dots">
-      <div class="progress-dot"></div>
-      <div class="progress-dot"></div>
-      <div class="progress-dot"></div>
-    </div>
-    <div class="progress-label" id="progress-label">Thinking...</div>
-  </div>
-
-  <!-- File chips -->
-  <div id="file-chips"></div>
-
-  <!-- Input -->
-  <div id="input-wrapper">
-    <div id="autocomplete"></div>
-    <div id="input-area">
-      <div id="input-container">
-        <textarea id="input" rows="1" placeholder="Ask Solvra... (/ for commands, @ for files)"></textarea>
-        <div id="input-footer">
-          <span>Shift+Enter for new line</span>
-          <span id="char-count"></span>
-        </div>
-      </div>
-      <button class="action-btn" id="send-btn" title="Send (Enter)">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.724 1.053a.5.5 0 01.555-.033l12 7a.5.5 0 010 .86l-12 7A.5.5 0 011.5 15.5V.5a.5.5 0 01.224-.447zM3 2.31v4.19h4.5a.5.5 0 010 1H3v4.19l9.144-4.69L3 2.31z"/></svg>
-        Send
-      </button>
-      <button class="action-btn" id="cancel-btn" title="Stop">
-        <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
-        Stop
-      </button>
-    </div>
-  </div>
-
-<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+    const version = vscode.workspace
+      .getConfiguration('solvra')
+      .get<UiVersion>('ui.version', 'legacy');
+    return getChatHtml(webview, this._extensionUri, version);
   }
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
 }

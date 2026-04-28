@@ -1,5 +1,8 @@
 (function() {
   var vsc = acquireVsCodeApi();
+  // Expose to v2 glue (chat-v2.js). acquireVsCodeApi() can only be called once
+  // per webview, and chat.js loads first, so we hand the handle out here.
+  window.__solvraVscode = vsc;
   var messagesEl = document.getElementById('messages');
   var emptyState = document.getElementById('empty-state');
   var inputEl = document.getElementById('input');

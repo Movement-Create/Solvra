@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AgentRunner } from './agent-runner';
 import { SolvraStatusBar } from './status-bar';
 import { SessionsProvider } from './sessions-provider';
+import { getChatHtml, UiVersion } from './chat-html';
 
 /**
  * Manages editor-tab-based session panels (as opposed to the sidebar chat).
@@ -83,12 +84,26 @@ export class SessionPanelManager {
 
     this._panels.set(sessionId, panel);
 
-    panel.onDidDispose(() => {
-      this._panels.delete(sessionId);
-    });
-
     panel.webview.html = this._getHtml(panel.webview, title);
     this._setupPanelHandlers(panel, sessionId);
+
+    const cfgSub = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('solvra.ui.version')) {
+        panel.webview.html = this._getHtml(panel.webview, title);
+      }
+      if (e.affectsConfiguration('solvra.model')) {
+        const cfg = vscode.workspace.getConfiguration('solvra');
+        panel.webview.postMessage({
+          type: 'modelChanged',
+          value: cfg.get<string>('model', 'gemini-2.5-flash'),
+        });
+      }
+    });
+
+    panel.onDidDispose(() => {
+      this._panels.delete(sessionId);
+      cfgSub.dispose();
+    });
 
     return panel;
   }
@@ -125,6 +140,30 @@ export class SessionPanelManager {
         case 'attachFile':
           pendingFiles.set(message.path, { relative: message.relative, content: message.content });
           break;
+        case 'setModel': {
+          const model = String(message.value || '').trim();
+          if (!model) break;
+          const provider = detectProviderForModel(model);
+          this._runner.setConfig(provider ? { model, provider } : { model });
+          await vscode.workspace
+            .getConfiguration('solvra')
+            .update('model', model, vscode.ConfigurationTarget.Global);
+          break;
+        }
+        case 'setMode':
+          // UI-only — no 'mode' concept in AgentRunner yet.
+          break;
+        case 'pickModel':
+          vscode.commands.executeCommand('solvra.pickModel');
+          break;
+        case 'requestInitPills': {
+          const cfg = vscode.workspace.getConfiguration('solvra');
+          panel.webview.postMessage({
+            type: 'initPills',
+            model: cfg.get<string>('model', 'gemini-2.5-flash'),
+          });
+          break;
+        }
       }
     });
   }
@@ -301,97 +340,12 @@ export class SessionPanelManager {
     );
   }
 
-  private _getHtml(webview: vscode.Webview, title: string): string {
-    const nonce = getNonce();
-    const cssUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'media', 'chat.css')
-    );
-    const jsUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, 'media', 'chat.js')
-    );
-    const safeTitle = escapeHtml(title);
-
-    return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${cssUri}">
-<title>${safeTitle}</title>
-</head>
-<body>
-  <div id="header">
-    <div id="header-left">${safeTitle}</div>
-  </div>
-
-  <div id="messages">
-    <div class="empty-state" id="empty-state">
-      <div class="empty-state-icon">S</div>
-      <div class="empty-state-title">What can I help you with?</div>
-      <div class="empty-state-subtitle">Ask questions, write code, debug issues, or explore your codebase.</div>
-      <div class="empty-state-hints">
-        <span><kbd>/</kbd> for commands</span>
-        <span><kbd>@</kbd> to attach files</span>
-        <span><kbd>Shift+Enter</kbd> for new line</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="progress-container" id="progress">
-    <div class="progress-dots">
-      <div class="progress-dot"></div>
-      <div class="progress-dot"></div>
-      <div class="progress-dot"></div>
-    </div>
-    <div class="progress-label" id="progress-label">Thinking...</div>
-  </div>
-
-  <div id="file-chips"></div>
-
-  <div id="input-wrapper">
-    <div id="autocomplete"></div>
-    <div id="input-area">
-      <div id="input-container">
-        <textarea id="input" rows="1" placeholder="Ask Solvra... (/ for commands, @ for files)"></textarea>
-        <div id="input-footer">
-          <span>Shift+Enter for new line</span>
-          <span id="char-count"></span>
-        </div>
-      </div>
-      <button class="action-btn" id="send-btn" title="Send (Enter)">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.724 1.053a.5.5 0 01.555-.033l12 7a.5.5 0 010 .86l-12 7A.5.5 0 011.5 15.5V.5a.5.5 0 01.224-.447zM3 2.31v4.19h4.5a.5.5 0 010 1H3v4.19l9.144-4.69L3 2.31z"/></svg>
-        Send
-      </button>
-      <button class="action-btn" id="cancel-btn" title="Stop">
-        <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
-        Stop
-      </button>
-    </div>
-  </div>
-
-<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+  private _getHtml(webview: vscode.Webview, _title: string): string {
+    const version = vscode.workspace
+      .getConfiguration('solvra')
+      .get<UiVersion>('ui.version', 'legacy');
+    return getChatHtml(webview, this._extensionUri, version);
   }
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let nonce = '';
-  for (let i = 0; i < 32; i++) {
-    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return nonce;
 }
 
 function generateId(): string {
@@ -401,4 +355,13 @@ function generateId(): string {
     id += chars[Math.floor(Math.random() * chars.length)];
   }
   return id;
+}
+
+function detectProviderForModel(model: string): string | null {
+  if (/^claude-/i.test(model)) return 'anthropic';
+  if (/^gpt-|^o[13]/i.test(model)) return 'openai';
+  if (/^gemini-/i.test(model)) return 'google';
+  if (/^(llama|mistral|codellama|phi|qwen)/i.test(model)) return 'ollama';
+  if (/^(moonshot-|kimi)/i.test(model)) return 'moonshot';
+  return null;
 }

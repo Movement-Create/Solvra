@@ -1,0 +1,72 @@
+/*
+  solvra-fonts.css — self-hosted webfonts for the v2 chat UI.
+
+  WHY self-host and not Google Fonts? VS Code webviews have a strict CSP.
+  Remote fetches are often blocked. Shipping the woff2 files with the
+  extension is the only reliable path.
+
+  HOW TO INSTALL THE FONTS (one-time, ~4 MB):
+
+    mkdir -p vscode-extension/media/fonts
+    cd vscode-extension/media/fonts
+
+    # Inter (UI) — pick 400 / 500 / 600 / 700 woff2 from:
+    #   https://github.com/rsms/inter/releases  (get Inter.zip → Web/)
+    # Copy these 4 files:
+    #   Inter-Regular.woff2
+    #   Inter-Medium.woff2
+    #   Inter-SemiBold.woff2
+    #   Inter-Bold.woff2
+
+    # JetBrains Mono (code) — from:
+    #   https://github.com/JetBrains/JetBrainsMono/releases  (webfonts/)
+    # Copy:
+    #   JetBrainsMono-Regular.woff2
+    #   JetBrainsMono-Medium.woff2
+
+  Both fonts are OFL-1.1 licensed — free for commercial use, just ship
+  their OFL.txt file alongside (put it in media/fonts/).
+*/
+
+@font-face {
+  font-family: 'Inter';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/Inter-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/Inter-Medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/Inter-SemiBold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/Inter-Bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-Regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-Medium.woff2') format('woff2');
+}

@@ -5,6 +5,7 @@ import { SolvraStatusBar } from './status-bar';
 import { registerCommands } from './commands';
 import { SessionsProvider } from './sessions-provider';
 import { SessionPanelManager } from './session-panel-manager';
+import { registerPickModel } from './pick-model';
 
 export function activate(context: vscode.ExtensionContext) {
   // Create output channel
@@ -66,6 +67,9 @@ export function activate(context: vscode.ExtensionContext) {
     sessionsProvider,
     sessionPanelManager
   );
+
+  // Model picker (⌘K M / Ctrl+K M)
+  registerPickModel(context);
 
   // First-run API key check
   const solvraConfig = vscode.workspace.getConfiguration('solvra');
