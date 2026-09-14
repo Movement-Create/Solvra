@@ -11,6 +11,7 @@ public sealed class OpenAiProvider : IProvider
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseUrl;
+    private readonly string? _sessionHeader;
 
     private static readonly Dictionary<string, (decimal Input, decimal Output)> Pricing = new()
     {
@@ -34,6 +35,17 @@ public sealed class OpenAiProvider : IProvider
             ?? Environment.GetEnvironmentVariable("OPENAI_BASE_URL")
             ?? "https://api.openai.com/v1";
         _http = http ?? new HttpClient();
+        _sessionHeader = Environment.GetEnvironmentVariable("SOLVRA_OPENCODE_SESSION")
+            ?? (_baseUrl.Contains("opencode.ai", StringComparison.OrdinalIgnoreCase)
+                ? Guid.NewGuid().ToString()
+                : null);
+    }
+
+    private void ApplyAuth(HttpRequestMessage request)
+    {
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+        if (_sessionHeader is not null)
+            request.Headers.Add("x-opencode-session", _sessionHeader);
     }
 
     public async Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)
@@ -41,7 +53,7 @@ public sealed class OpenAiProvider : IProvider
         var request = BuildRequest(options);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions");
         httpRequest.Content = JsonContent.Create(request);
-        httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+        ApplyAuth(httpRequest);
 
         using var response = await _http.SendAsync(httpRequest, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
@@ -63,7 +75,7 @@ public sealed class OpenAiProvider : IProvider
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions");
         httpRequest.Content = JsonContent.Create(request);
-        httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+        ApplyAuth(httpRequest);
 
         using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -86,13 +98,15 @@ public sealed class OpenAiProvider : IProvider
             var root = doc.RootElement;
 
             // Check for usage in final chunk
-            if (root.TryGetProperty("usage", out var usageEl))
+            if (root.TryGetProperty("usage", out var usageEl) && usageEl.ValueKind == JsonValueKind.Object)
             {
                 if (usageEl.TryGetProperty("prompt_tokens", out var pt)) inputTokens = pt.GetInt32();
                 if (usageEl.TryGetProperty("completion_tokens", out var ct2)) outputTokens = ct2.GetInt32();
             }
 
-            if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+            if (!root.TryGetProperty("choices", out var choices)
+                || choices.ValueKind != JsonValueKind.Array
+                || choices.GetArrayLength() == 0)
                 continue;
 
             var choice = choices[0];
@@ -100,7 +114,7 @@ public sealed class OpenAiProvider : IProvider
                 ? fr.GetString()
                 : null;
 
-            if (choice.TryGetProperty("delta", out var delta))
+            if (choice.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.Object)
             {
                 // Text content
                 if (delta.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
@@ -111,11 +125,13 @@ public sealed class OpenAiProvider : IProvider
                 }
 
                 // Tool calls
-                if (delta.TryGetProperty("tool_calls", out var toolCalls))
+                if (delta.TryGetProperty("tool_calls", out var toolCalls) && toolCalls.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var tc in toolCalls.EnumerateArray())
                     {
-                        var index = tc.GetProperty("index").GetInt32();
+                        var index = tc.TryGetProperty("index", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number
+                            ? idxEl.GetInt32()
+                            : 0;
 
                         // First appearance: has id and function.name
                         if (tc.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String)
@@ -123,8 +139,10 @@ public sealed class OpenAiProvider : IProvider
                             var id = idEl.GetString() ?? $"call_{index}";
                             toolIds[index] = id;
 
-                            if (tc.TryGetProperty("function", out var func) &&
-                                func.TryGetProperty("name", out var nameEl))
+                            if (tc.TryGetProperty("function", out var func)
+                                && func.ValueKind == JsonValueKind.Object
+                                && func.TryGetProperty("name", out var nameEl)
+                                && nameEl.ValueKind == JsonValueKind.String)
                             {
                                 yield return new StreamToolUseStart(id, nameEl.GetString() ?? "");
                                 toolStarted[index] = true;
@@ -132,9 +150,10 @@ public sealed class OpenAiProvider : IProvider
                         }
 
                         // Arguments fragment
-                        if (tc.TryGetProperty("function", out var funcDelta) &&
-                            funcDelta.TryGetProperty("arguments", out var argsEl) &&
-                            argsEl.ValueKind == JsonValueKind.String)
+                        if (tc.TryGetProperty("function", out var funcDelta)
+                            && funcDelta.ValueKind == JsonValueKind.Object
+                            && funcDelta.TryGetProperty("arguments", out var argsEl)
+                            && argsEl.ValueKind == JsonValueKind.String)
                         {
                             var fragment = argsEl.GetString() ?? "";
                             if (!string.IsNullOrEmpty(fragment) && toolIds.TryGetValue(index, out var toolId))
@@ -165,7 +184,7 @@ public sealed class OpenAiProvider : IProvider
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/models");
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+        ApplyAuth(request);
 
         using var response = await _http.SendAsync(request, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
@@ -190,7 +209,7 @@ public sealed class OpenAiProvider : IProvider
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/models");
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+            ApplyAuth(request);
             using var response = await _http.SendAsync(request, ct);
             return response.IsSuccessStatusCode;
         }

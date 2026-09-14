@@ -244,7 +244,8 @@ public sealed class AgentLoop
             if (response.ToolCalls.Count == 0)
             {
                 lastText = response.Text ?? "";
-                options.OnText?.Invoke(lastText);
+                if (!options.Streaming)
+                    options.OnText?.Invoke(lastText);
 
                 // Append assistant message
                 messages.Add(Message.FromText(MessageRole.Assistant, lastText));
@@ -262,7 +263,8 @@ public sealed class AgentLoop
             if (!string.IsNullOrEmpty(response.Text))
             {
                 assistantContent.Add(new TextContent { Text = response.Text });
-                options.OnText?.Invoke(response.Text);
+                if (!options.Streaming)
+                    options.OnText?.Invoke(response.Text);
             }
 
             foreach (var tc in response.ToolCalls)
