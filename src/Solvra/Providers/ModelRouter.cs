@@ -61,6 +61,7 @@ public sealed class ModelRouter
             ["google"] = () => new GoogleProvider(),
             ["ollama"] = () => new OllamaProvider(),
             ["moonshot"] = () => new MoonshotProvider(),
+            ["chatgpt"] = () => new ChatGptProvider(),
         };
     }
 
