@@ -339,7 +339,7 @@ public static class Program
                 var providerId = providerFilter ?? config.Provider;
                 var prov = router.GetProvider(providerId);
                 var models = await prov.ListModelsAsync(context.GetCancellationToken());
-                var json = JsonSerializer.Serialize(new { provider = providerId, models },
+                var json = JsonSerializer.Serialize(new { provider = providerId, defaultModel = providerFilter == null || providerFilter == config.Provider ? config.Model : null, models },
                     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
                 Console.WriteLine(json);
                 return;
