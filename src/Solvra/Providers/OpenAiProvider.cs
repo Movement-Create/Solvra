@@ -78,7 +78,7 @@ public sealed class OpenAiProvider : IProvider
         ApplyAuth(httpRequest);
 
         using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        await HttpErrors.EnsureSuccessAsync(response, "OpenAI", ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

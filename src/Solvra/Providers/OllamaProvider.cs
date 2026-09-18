@@ -50,7 +50,7 @@ public sealed class OllamaProvider : IProvider
         httpRequest.Content = JsonContent.Create(request);
 
         using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        await HttpErrors.EnsureSuccessAsync(response, "Ollama", ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

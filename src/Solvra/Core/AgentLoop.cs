@@ -38,13 +38,13 @@ public sealed class AgentLoop
         _router = router;
         _toolRegistry = toolRegistry;
         _hookEngine = hookEngine ?? new HookEngine();
-        _auditLogger = auditLogger ?? new AuditLogger("logs");
+        _auditLogger = auditLogger ?? new AuditLogger(Solvra.Config.SolvraPaths.LogsDir);
         _skillLoader = skillLoader;
         _memoryManager = memoryManager;
         _permissionChecker = permissionChecker ?? new PermissionChecker();
         _costTracker = costTracker ?? new CostTracker();
         _sessionManager = sessionManager ?? new SessionManager();
-        _tracer = tracer ?? new Tracer("AgentLoop");
+        _tracer = tracer ?? new Tracer(Path.Combine(Solvra.Config.SolvraPaths.LogsDir, "traces.jsonl"));
     }
 
     public async Task<AgentRunResult> RunAsync(AgentRunOptions options, CancellationToken ct = default)

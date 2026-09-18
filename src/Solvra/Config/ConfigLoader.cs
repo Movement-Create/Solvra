@@ -165,6 +165,8 @@ public static partial class ConfigLoader
         var obsLevel = Environment.GetEnvironmentVariable("SOLVRA_OBS_LEVEL");
         var obsNarrate = Environment.GetEnvironmentVariable("SOLVRA_OBS_NARRATE");
         var otelEndpoint = Environment.GetEnvironmentVariable("SOLVRA_OTEL_ENDPOINT");
+        var sessionsDir = Environment.GetEnvironmentVariable("SOLVRA_SESSIONS_DIR");
+        var memoryDir = Environment.GetEnvironmentVariable("SOLVRA_MEMORY_DIR");
 
         return config with
         {
@@ -175,6 +177,8 @@ public static partial class ConfigLoader
             MaxBudgetUsd = decimal.TryParse(maxBudget, out var mb) ? mb : config.MaxBudgetUsd,
             PermissionMode = !string.IsNullOrEmpty(permMode) ? permMode : config.PermissionMode,
             SystemPrompt = !string.IsNullOrEmpty(sysPrompt) ? sysPrompt : config.SystemPrompt,
+            SessionsDir = !string.IsNullOrEmpty(sessionsDir) ? sessionsDir : config.SessionsDir,
+            MemoryDir = !string.IsNullOrEmpty(memoryDir) ? memoryDir : config.MemoryDir,
             Observability = config.Observability with
             {
                 Level = !string.IsNullOrEmpty(obsLevel) ? obsLevel : config.Observability.Level,

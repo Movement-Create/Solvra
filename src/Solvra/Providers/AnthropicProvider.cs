@@ -65,7 +65,7 @@ public sealed class AnthropicProvider : IProvider
         httpRequest.Headers.Add("anthropic-version", ApiVersion);
 
         using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        await HttpErrors.EnsureSuccessAsync(response, "Anthropic", ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

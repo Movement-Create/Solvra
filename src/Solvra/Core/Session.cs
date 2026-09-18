@@ -33,7 +33,7 @@ public sealed class SessionManager
 
     public SessionManager(string? sessionsDir = null)
     {
-        _sessionsDir = sessionsDir ?? "sessions";
+        _sessionsDir = sessionsDir ?? Solvra.Config.SolvraPaths.SessionsDir;
     }
 
     public async Task<SessionConfig> CreateAsync(SessionConfig config, Dictionary<string, object?>? overrides = null)
@@ -252,6 +252,9 @@ public sealed class SessionManager
             CreatedAt = DateTime.UtcNow.ToString("o"),
             FilePath = filePath
         };
+        // Keep appending to the file we actually loaded, even if the stored path was relative
+        // to another working directory.
+        config = config with { FilePath = filePath };
 
         return new SessionInfo { Config = config, Messages = messages };
     }

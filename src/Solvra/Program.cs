@@ -173,6 +173,8 @@ public static class Program
         chatCommand.AddOption(maxBudgetOption);
         var resumeOption = new Option<string?>("--resume", "Resume existing session");
         chatCommand.AddOption(resumeOption);
+        var ndjsonOption = new Option<bool>("--ndjson", "Machine-readable NDJSON protocol on stdin/stdout");
+        chatCommand.AddOption(ndjsonOption);
 
         chatCommand.SetHandler(async (context) =>
         {
@@ -183,6 +185,7 @@ public static class Program
             var effort = context.ParseResult.GetValueForOption(effortOption);
             var maxBudget = context.ParseResult.GetValueForOption(maxBudgetOption);
             var resume = context.ParseResult.GetValueForOption(resumeOption);
+            var ndjson = context.ParseResult.GetValueForOption(ndjsonOption);
             var ct = context.GetCancellationToken();
 
             var config = await ConfigLoader.LoadAsync();
@@ -223,7 +226,17 @@ public static class Program
                 var info = await sessionMgr.ResumeAsync(resume);
                 sessionConfig = info.Config;
                 history.AddRange(info.Messages);
-                Console.WriteLine($"Resumed session {resume}");
+                if (!ndjson) Console.WriteLine($"Resumed session {resume}");
+                else if (!string.IsNullOrEmpty(model))
+                {
+                    // UI clients restart the process to resume; honour the model they have selected.
+                    var colon = model.IndexOf(':');
+                    sessionConfig = sessionConfig with
+                    {
+                        Model = model,
+                        Provider = colon > 0 ? model[..colon] : provider ?? ModelRouter.DetectProvider(model) ?? sessionConfig.Provider,
+                    };
+                }
             }
             else
             {
@@ -247,6 +260,12 @@ public static class Program
                     MaxTurns = maxTurns ?? config.MaxTurns,
                     MaxBudgetUsd = maxBudget ?? 5.0m,
                 });
+            }
+
+            if (ndjson)
+            {
+                await NdjsonChat.RunAsync(reflection, sessionMgr, sessionConfig, history, auto, !string.IsNullOrEmpty(resume), ct);
+                return;
             }
 
             Console.WriteLine($"Solvra Chat ({sessionConfig.Model}) — type /exit to quit");
@@ -304,9 +323,28 @@ public static class Program
 
         // --- solvra models ---
         var modelsCommand = new Command("models", "List available models");
+        var modelsJsonOption = new Option<bool>("--json", "Output as JSON");
+        var modelsProviderOption = new Option<string?>("--provider", "Limit to one provider");
+        modelsCommand.AddOption(modelsJsonOption);
+        modelsCommand.AddOption(modelsProviderOption);
         modelsCommand.SetHandler(async (context) =>
         {
+            var asJson = context.ParseResult.GetValueForOption(modelsJsonOption);
+            var providerFilter = context.ParseResult.GetValueForOption(modelsProviderOption);
             var router = new ModelRouter();
+
+            if (asJson)
+            {
+                var config = await ConfigLoader.LoadAsync();
+                var providerId = providerFilter ?? config.Provider;
+                var prov = router.GetProvider(providerId);
+                var models = await prov.ListModelsAsync(context.GetCancellationToken());
+                var json = JsonSerializer.Serialize(new { provider = providerId, models },
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                Console.WriteLine(json);
+                return;
+            }
+
             foreach (var providerId in router.GetRegisteredProviderIds())
             {
                 try
@@ -654,7 +692,7 @@ public static class Program
     private static (ModelRouter Router, ToolRegistry Registry, HookEngine HookEngine, AuditLogger AuditLogger, SkillLoader SkillLoader, MemoryManager MemoryManager, PermissionChecker PermissionChecker, Tracer Tracer) BuildSubsystems(SolvraConfig config)
     {
         var router = new ModelRouter();
-        var auditLogger = new AuditLogger("logs");
+        var auditLogger = new AuditLogger(SolvraPaths.LogsDir);
         var sandbox = new SandboxManager(new SandboxConfig());
         var registry = new ToolRegistry(auditLogger);
         registry.RegisterBuiltins(sandbox);
@@ -663,7 +701,7 @@ public static class Program
         var skillLoader = new SkillLoader(config.SkillsDir);
         var memoryManager = new MemoryManager(config.MemoryDir);
         var permissionChecker = new PermissionChecker();
-        var tracer = new Tracer("Solvra");
+        var tracer = new Tracer(Path.Combine(SolvraPaths.LogsDir, "traces.jsonl"));
 
         // P5: Subscribe Printer once at process startup (not per AgentLoop instance)
         tracer.OnSpanEvent += Printer.HandleSpanEvent;

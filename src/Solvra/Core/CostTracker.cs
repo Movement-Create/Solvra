@@ -46,7 +46,7 @@ public sealed class CostTracker
 
     public CostTracker(string? ledgerPath = null)
     {
-        _ledgerPath = ledgerPath ?? Path.Combine("sessions", "cost-ledger.jsonl");
+        _ledgerPath = ledgerPath ?? Path.Combine(Solvra.Config.SolvraPaths.SessionsDir, "cost-ledger.jsonl");
     }
 
     public async Task RecordAsync(CostEntry entry)
