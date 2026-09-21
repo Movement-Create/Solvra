@@ -1,0 +1,5 @@
+From sales.json produce three reports using Solvra's document tools:
+1. csv_write: out/revenue_by_region.csv with columns region,units,revenue (revenue = units*price summed per
+   region), sorted by revenue descending, revenue with two decimals.
+2. spreadsheet_create: out/sales.xlsx containing the raw rows.
+3. doc_create: out/summary.pdf, a one-page PDF summary stating total revenue and the top region.

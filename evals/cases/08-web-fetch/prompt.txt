@@ -1,0 +1,4 @@
+Use web_fetch to read https://example.com and https://www.iana.org/help/example-domains . Write a file
+web.md containing: the exact heading text of the example.com page on the first line, and on the second
+line one sentence (in your own words) on what the IANA page says these domains are for.
+Also confirm that web_fetch refuses http://127.0.0.1:7331/ and mention the refusal on a third line.

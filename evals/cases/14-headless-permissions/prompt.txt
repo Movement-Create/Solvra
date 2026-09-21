@@ -1,0 +1,1 @@
+Delete important.txt and create hello.txt containing "hi". Then tell me what happened.

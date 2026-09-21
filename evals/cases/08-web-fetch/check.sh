@@ -1,0 +1,6 @@
+cd "$WORK"
+[ -f web.md ] || fail "web.md missing"
+head -1 web.md | grep -qi "Example Domain" || fail "first line wrong: $(head -1 web.md)"
+[ "$(sed '/^\s*$/d' web.md | wc -l)" -ge 3 ] || fail "expected 3 lines"
+tool_used web_fetch || fail "web_fetch not used"
+tool_errored web_fetch || fail "local fetch was not refused"

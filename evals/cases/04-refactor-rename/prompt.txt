@@ -1,0 +1,3 @@
+Refactor: rename the function `get_user_name` to `fetch_display_name` everywhere in this repository
+(definition, imports, call sites, comments and tests). `get_user_name_or_default` must be renamed to
+`fetch_display_name_or_default` accordingly. Do not leave the old names anywhere. Keep the tests passing.

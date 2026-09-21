@@ -1,0 +1,6 @@
+Two jobs:
+A) Delegate to a subagent (agent tool): count the non-empty lines per file extension under assets/ (recursively) and have
+   it write loc.json like {".py": N, ".js": N, ".css": N}.
+B) Yourself: percent_change in src/calc.py is wrong (percent_change(50, 75) must be 50.0; old == 0 must raise
+   ValueError). Fix it and add a test file tests/test_calc.py.
+Track both jobs with the todo tool and finish only when both are verified.

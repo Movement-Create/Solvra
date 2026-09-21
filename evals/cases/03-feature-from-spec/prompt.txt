@@ -1,0 +1,10 @@
+Create a Python module `durations.py` in this repo implementing:
+
+- `parse_duration(text) -> int` returning seconds. Accepts combinations of `<number><unit>` with units
+  w (weeks), d, h, m, s, optionally separated by spaces, case-insensitive, e.g. "1h30m" -> 5400,
+  "2d 4h" -> 187200, "90s" -> 90, "1W" -> 604800. A bare number means seconds ("45" -> 45).
+  Empty strings, unknown units, repeated units ("1h2h"), negative numbers or garbage raise ValueError.
+- `format_duration(seconds) -> str` producing the canonical compact form, largest units first, zero parts
+  omitted: 5400 -> "1h30m", 0 -> "0s", 694861 -> "1w1d1h1m1s". Negative input raises ValueError.
+
+Also write thorough unit tests in `test_durations.py` (unittest) and run them.

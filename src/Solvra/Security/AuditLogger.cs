@@ -13,6 +13,10 @@ public record AuditEvent(
 
 public class AuditLogger : IAsyncDisposable
 {
+    // Keep commands readable in the log ("&&", quotes, ">" instead of \u0026 escapes).
+    private static readonly System.Text.Json.JsonSerializerOptions ReadableJson =
+        new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     private readonly string _logPath;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private StreamWriter? _writer;
@@ -37,7 +41,7 @@ public class AuditLogger : IAsyncDisposable
     public async Task LogAsync(string eventType, object? data = null, string? sessionId = null)
     {
         var jsonData = data != null
-            ? JsonSerializer.SerializeToElement(data)
+            ? JsonSerializer.SerializeToElement(data, ReadableJson)
             : (JsonElement?)null;
 
         var entry = new AuditEvent(
@@ -46,7 +50,7 @@ public class AuditLogger : IAsyncDisposable
             SessionId: sessionId,
             Data: jsonData);
 
-        var line = JsonSerializer.Serialize(entry);
+        var line = JsonSerializer.Serialize(entry, ReadableJson);
 
         await _lock.WaitAsync();
         try

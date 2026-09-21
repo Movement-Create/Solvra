@@ -1,0 +1,17 @@
+Running `python3 -m invoicer.cli` crashes for a customer:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "invoicer/cli.py", line 13, in <module>
+    main(sys.argv)
+  File "invoicer/cli.py", line 9, in main
+    print(render(ITEMS, cfg))
+  File "invoicer/render.py", line 6, in render
+    tax = tax_for(net, cfg)
+  File "invoicer/tax.py", line 3, in tax_for
+    if cfg["tax"]["inclusive"]:
+KeyError: 'inclusive'
+
+Their invoicer.json only overrides some settings. Fix the root cause so partial nested config overrides
+work (missing keys fall back to defaults at every nesting level) without mutating DEFAULTS, then add a
+unittest in tests/test_config.py proving it. Verify the CLI prints the invoice.

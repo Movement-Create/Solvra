@@ -1,0 +1,5 @@
+Bug reports from users of the textstats package:
+1. word_count("Hello,  world!") returns 3 (double space) and word_count("  ") returns 3; it should count words only.
+2. median([1, 2, 3, 4]) returns 3 but should be 2.5.
+3. top_words("The cat the Cat THE dog") should treat words case-insensitively and break ties alphabetically; it returns wrong results.
+Fix all three bugs in textstats/stats.py and add regression tests for each to tests/test_stats.py. Run the test suite to confirm.

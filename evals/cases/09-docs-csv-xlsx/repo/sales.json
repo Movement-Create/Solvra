@@ -1,0 +1,7 @@
+[
+  {"region": "North", "month": "2026-07", "units": 120, "price": 9.5},
+  {"region": "South", "month": "2026-07", "units": 80, "price": 11.0},
+  {"region": "North", "month": "2026-08", "units": 150, "price": 9.5},
+  {"region": "South", "month": "2026-08", "units": 95, "price": 11.0},
+  {"region": "East", "month": "2026-08", "units": 60, "price": 12.25}
+]

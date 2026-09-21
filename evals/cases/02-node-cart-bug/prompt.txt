@@ -1,0 +1,5 @@
+Customer support escalations for the shopping cart (Node.js, run tests with `npm test`):
+- Adding the same SKU twice replaces the quantity instead of increasing it.
+- A 10% coupon on a $19.99 order charges less than $17.99 — the discount seems to be applied more than once.
+- Totals must always be whole cents (round half up) and receipts must show two decimals, e.g. "Total: $17.99".
+Find and fix the root causes, add tests covering each report, and make sure `npm test` passes.

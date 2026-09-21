@@ -1,0 +1,6 @@
+cd "$WORK"
+[ -f sites.txt ] || fail "sites.txt missing"
+grep -qiE "^psf: *https?://(www\.)?python\.org" sites.txt || fail "psf url wrong: $(grep -i psf sites.txt)"
+grep -qiE "^node: *https?://(www\.)?nodejs\.org" sites.txt || fail "node url wrong: $(grep -i node sites.txt)"
+tool_used web_search || fail "web_search not used"
+tool_errored web_search && note "a web_search call returned an error"

@@ -78,6 +78,17 @@ CLI
 - Follow-up fixes: file_read char cap halved + "large file, use grep" hint; ChatGPT stop reasons normalized;
   ChatGPT stream parser tests; subscription cost label. Tests 316/316; redeployed.
 
+## Scenario eval suite (evals/, 2026-09-21)
+- 16 end-to-end cases with hidden checks (see evals/README.md); runner `evals/run.sh`.
+- Dry run with a no-op agent: 0/16 pass (checks are meaningful).
+- chatgpt:gpt-5.6-luna: 16/16 (case 05 initially failed on a check-script bug, re-scored after fixing the check;
+  case 16 web_search run separately). All 16 tools exercised: bash, code_run, file_read/write/edit, glob, grep,
+  web_fetch, web_search, csv_write,
+  spreadsheet_create, doc_create, memory_note/recall, todo, agent (+ plan mode, headless refusal, sessions).
+- chatgpt:gpt-5.6-sol on the 6 hardest coding cases (01 02 03 05 10 13): 6/6. The subagent depth cap was hit and
+  handled cleanly in case 10.
+- Harness change from this round: audit log uses readable JSON escaping.
+
 ## Remaining / next
 - After the quota resets: re-run /tmp/solvra-eval (run.sh with template/template2) on glm-5.3-flash, minimax-m2.5,
   mimo-v2.5, qwen3.8-flash (no prefix needed now), kimi-k2.6, kimi-k3 (reasoning replay), gpt-5.6-luna.

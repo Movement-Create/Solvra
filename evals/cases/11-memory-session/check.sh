@@ -1,0 +1,5 @@
+cd "$WORK"
+[ "$(head -1 notes.md)" = "# Zephyr" ] || fail "session continuation failed: $(head -1 notes.md 2>/dev/null)"
+[ "$(sed '/^\s*$/d' notes.md | wc -l)" -ge 3 ] || fail "haiku lost"
+[ "$(tr -d ' \n' < port.txt)" = "8123" ] || fail "memory recall failed: $(cat port.txt 2>/dev/null)"
+tool_used memory_note || fail "memory_note not used"

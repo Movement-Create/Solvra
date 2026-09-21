@@ -1,0 +1,7 @@
+This is a small .NET 8 solution (Ledger + Ledger.Tests, run with `dotnet test Ledger.Tests`). Bugs reported:
+1. With OverdraftLimit = 100 an account with balance 0 cannot withdraw 50 — the overdraft limit is meant
+   to be how far below zero the balance may go.
+2. MonthlyInterest(12) on a balance of 100.00 returns 100.00 instead of 1.00, and negative balances must
+   earn 0 interest. Rounding must be half away from zero (0.125 -> 0.13).
+3. Withdrawing a negative amount is accepted and increases the balance; it must throw ArgumentException.
+Fix them and add xunit tests for each case. Make sure `dotnet test Ledger.Tests` passes.

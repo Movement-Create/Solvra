@@ -1,0 +1,3 @@
+logs/app.log is a large production log. Find every distinct ERROR code in it and how many times each
+occurs. Write the result to errors.csv with header `code,count`, sorted by count descending. Do not
+modify the log.

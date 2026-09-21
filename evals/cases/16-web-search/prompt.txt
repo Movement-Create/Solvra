@@ -1,0 +1,2 @@
+Use the web_search tool to find the official website of the Python Software Foundation and the URL of
+the Node.js project's official site. Write them to sites.txt as two lines: `psf: <url>` and `node: <url>`.
