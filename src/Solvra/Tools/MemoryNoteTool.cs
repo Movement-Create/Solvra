@@ -9,7 +9,8 @@ public class MemoryNoteTool : ToolBase
 {
     public override string Name => "memory_note";
     public override string Description => "Save a memory note (fact or lesson) for future recall.";
-    public override PermissionLevel PermissionLevel => PermissionLevel.Write;
+    // Harness-internal state only (no user files), so it needs no approval.
+    public override PermissionLevel PermissionLevel => PermissionLevel.Read;
 
     public override JsonElement GetInputSchema() => BuildSchema(new
     {
@@ -32,7 +33,7 @@ public class MemoryNoteTool : ToolBase
         var tags = GetStringArray(input, "tags");
         var kind = GetOptionalString(input, "kind") ?? "lesson";
 
-        var memoryDir = Path.Combine(context.Cwd, "memory");
+        var memoryDir = Solvra.Config.SolvraPaths.MemoryDir;
         Directory.CreateDirectory(memoryDir);
 
         var filename = kind == "fact" ? "facts.md" : "lessons.md";

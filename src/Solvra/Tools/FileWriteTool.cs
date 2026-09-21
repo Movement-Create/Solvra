@@ -8,7 +8,7 @@ namespace Solvra.Tools;
 public class FileWriteTool : ToolBase
 {
     public override string Name => "file_write";
-    public override string Description => "Write content to a file, creating directories as needed.";
+    public override string Description => "Create or overwrite a whole file (parent directories are created). For changes to an existing file prefer file_edit.";
     public override PermissionLevel PermissionLevel => PermissionLevel.Write;
 
     public override JsonElement GetInputSchema() => BuildSchema(new
@@ -37,8 +37,10 @@ public class FileWriteTool : ToolBase
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        await File.WriteAllTextAsync(path, content, ct);
+        var existed = File.Exists(path);
+        await File.WriteAllTextAsync(path, content, new System.Text.UTF8Encoding(false), ct);
 
-        return new ToolExecuteResult($"File written: {path} ({content.Length} bytes)", false);
+        var lines = content.Length == 0 ? 0 : content.Count(c => c == '\n') + (content.EndsWith('\n') ? 0 : 1);
+        return new ToolExecuteResult($"{(existed ? "Overwrote" : "Created")} {path} ({lines} lines, {System.Text.Encoding.UTF8.GetByteCount(content)} bytes)", false);
     }
 }

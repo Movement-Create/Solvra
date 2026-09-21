@@ -1,5 +1,6 @@
 #nullable enable
 
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Solvra.Security;
@@ -8,8 +9,17 @@ namespace Solvra.Tools;
 
 public class GrepTool : ToolBase
 {
+    private const int DefaultMaxResults = 200;
+    private const int MaxFileBytes = 5 * 1024 * 1024;
+
     public override string Name => "grep";
-    public override string Description => "Search file contents using regex patterns.";
+
+    public override string Description =>
+        "Search file contents with a .NET regular expression. Skips .git, node_modules, bin/obj, binaries and " +
+        ".gitignore'd paths. output_mode: \"content\" (default, file:line: text), \"files\" (matching paths only) " +
+        "or \"count\". Use glob to filter files (e.g. \"*.cs\", \"src/**/*.ts\"), context for surrounding lines, " +
+        "case_insensitive for case-insensitive matching. path may be a directory or a single file.";
+
     public override PermissionLevel PermissionLevel => PermissionLevel.Read;
 
     public override JsonElement GetInputSchema() => BuildSchema(new
@@ -18,8 +28,12 @@ public class GrepTool : ToolBase
         properties = new
         {
             pattern = new { type = "string", description = "Regex pattern to search for" },
-            glob = new { type = "string", description = "File glob filter (e.g., *.cs)" },
-            path = new { type = "string", description = "Base directory to search" }
+            path = new { type = "string", description = "Directory or file to search (default: working directory)" },
+            glob = new { type = "string", description = "File glob filter (e.g. *.cs or src/**/*.py)" },
+            output_mode = new { type = "string", @enum = new[] { "content", "files", "count" }, description = "content (default), files or count" },
+            case_insensitive = new { type = "boolean", description = "Case-insensitive match" },
+            context = new { type = "integer", description = "Lines of context before and after each match (content mode)" },
+            max_results = new { type = "integer", description = $"Maximum matches/files to return (default {DefaultMaxResults})" }
         },
         required = new[] { "pattern" }
     });
@@ -27,105 +41,96 @@ public class GrepTool : ToolBase
     public override async Task<ToolExecuteResult> ExecuteAsync(JsonElement input, ToolExecutionContext context, CancellationToken ct = default)
     {
         var pattern = GetString(input, "pattern");
-        var globFilter = GetOptionalString(input, "glob");
-        var basePath = GetOptionalString(input, "path") ?? context.Cwd;
+        if (string.IsNullOrEmpty(pattern))
+            return new ToolExecuteResult("Error: pattern is required", true);
 
+        var globFilter = GetOptionalString(input, "glob");
+        var basePath = GetOptionalString(input, "path") is { Length: > 0 } p ? p : context.Cwd;
         if (!Path.IsPathRooted(basePath))
             basePath = Path.Combine(context.Cwd, basePath);
+
+        var mode = (GetOptionalString(input, "output_mode") ?? "content").ToLowerInvariant();
+        if (mode is not ("content" or "files" or "count"))
+            return new ToolExecuteResult("Error: output_mode must be content, files or count", true);
+        var caseInsensitive = input.TryGetProperty("case_insensitive", out var ci) && ci.ValueKind == JsonValueKind.True;
+        var contextLines = Math.Clamp(GetOptionalInt(input, "context") ?? 0, 0, 10);
+        var maxResults = Math.Clamp(GetOptionalInt(input, "max_results") ?? DefaultMaxResults, 1, 2000);
 
         Regex regex;
         try
         {
-            regex = new Regex(pattern, RegexOptions.Compiled);
+            var opts = RegexOptions.Compiled | (caseInsensitive ? RegexOptions.IgnoreCase : RegexOptions.None);
+            regex = new Regex(pattern, opts, TimeSpan.FromSeconds(2));
         }
         catch (ArgumentException ex)
         {
             return new ToolExecuteResult($"Error: invalid regex: {ex.Message}", true);
         }
 
-        Regex? globRegex = null;
-        if (!string.IsNullOrEmpty(globFilter))
-            globRegex = GlobTool.GlobToRegex(globFilter);
+        Regex? globRegex = string.IsNullOrEmpty(globFilter) ? null : GlobTool.GlobToRegex(globFilter);
 
-        var ignoreSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        IEnumerable<(string FullPath, string RelPath)> files;
+        if (File.Exists(basePath))
+            files = [(basePath, Path.GetFileName(basePath))];
+        else if (Directory.Exists(basePath))
+            files = new FileWalker(basePath).Files(ct: ct);
+        else
+            return new ToolExecuteResult($"Error: path not found: {basePath}", true);
+
+        var output = new StringBuilder();
+        var results = 0;
+        var filesMatched = 0;
+        var truncated = false;
+
+        await Task.Run(() =>
         {
-            "node_modules", ".git", "bin", "obj", ".vs", "__pycache__"
-        };
-
-        var results = new List<string>();
-        var maxResults = 250;
-
-        await Task.Run(() => SearchDirectory(basePath, basePath, regex, globRegex, ignoreSet, results, maxResults), ct);
-
-        if (results.Count == 0)
-            return new ToolExecuteResult("No matches found.", false);
-
-        return new ToolExecuteResult(string.Join('\n', results), false);
-    }
-
-    private static void SearchDirectory(
-        string root, string current, Regex pattern, Regex? globFilter,
-        HashSet<string> ignore, List<string> results, int maxResults)
-    {
-        if (results.Count >= maxResults) return;
-
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(current))
+            foreach (var (full, rel) in files)
             {
-                if (results.Count >= maxResults) return;
+                if (results >= maxResults) { truncated = true; break; }
+                if (globRegex != null && !GlobTool.Matches(globRegex, globFilter!, rel)) continue;
+                try { if (new FileInfo(full).Length > MaxFileBytes) continue; } catch { continue; }
+                if (FileWalker.IsBinaryFile(full)) continue;
 
-                var name = Path.GetFileName(file);
-                var relPath = Path.GetRelativePath(root, file);
+                string[] lines;
+                try { lines = File.ReadAllLines(full); } catch { continue; }
 
-                if (globFilter != null && !globFilter.IsMatch(relPath) && !globFilter.IsMatch(name))
-                    continue;
-
-                // Skip binary files
-                if (IsBinaryFile(file)) continue;
-
-                try
+                var matchCount = 0;
+                var lastPrinted = -1;
+                for (var i = 0; i < lines.Length; i++)
                 {
-                    var lines = File.ReadLines(file);
-                    var lineNum = 0;
-                    foreach (var line in lines)
+                    bool isMatch;
+                    try { isMatch = regex.IsMatch(lines[i]); } catch (RegexMatchTimeoutException) { isMatch = false; }
+                    if (!isMatch) continue;
+                    matchCount++;
+                    if (mode != "content") continue;
+                    if (results >= maxResults) { truncated = true; break; }
+                    results++;
+
+                    var from = Math.Max(0, i - contextLines);
+                    var to = Math.Min(lines.Length - 1, i + contextLines);
+                    if (contextLines > 0 && lastPrinted >= 0 && from > lastPrinted + 1) output.AppendLine("--");
+                    for (var j = Math.Max(from, lastPrinted + 1); j <= to; j++)
                     {
-                        lineNum++;
-                        if (results.Count >= maxResults) return;
-
-                        if (pattern.IsMatch(line))
-                        {
-                            results.Add($"{relPath}:{lineNum}: {line.TrimEnd()}");
-                        }
+                        var sep = j == i ? ":" : "-";
+                        output.Append(rel).Append(sep).Append(j + 1).Append(sep).Append(' ')
+                              .AppendLine(ToolOutput.ClipLongLines(lines[j].TrimEnd()));
                     }
+                    lastPrinted = to;
                 }
-                catch (Exception) { }
-            }
 
-            foreach (var dir in Directory.EnumerateDirectories(current))
-            {
-                var dirName = Path.GetFileName(dir);
-                if (ignore.Contains(dirName)) continue;
-                SearchDirectory(root, dir, pattern, globFilter, ignore, results, maxResults);
+                if (matchCount == 0) continue;
+                filesMatched++;
+                if (mode == "files") { output.AppendLine(rel); results++; }
+                else if (mode == "count") { output.Append(rel).Append(':').Append(matchCount).AppendLine(); results++; }
             }
-        }
-        catch (UnauthorizedAccessException) { }
-        catch (DirectoryNotFoundException) { }
-    }
+        }, ct);
 
-    private static bool IsBinaryFile(string path)
-    {
-        try
-        {
-            var buffer = new byte[512];
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var bytesRead = fs.Read(buffer, 0, buffer.Length);
-            for (var i = 0; i < bytesRead; i++)
-            {
-                if (buffer[i] == 0) return true;
-            }
-            return false;
-        }
-        catch { return true; }
+        if (output.Length == 0)
+            return new ToolExecuteResult($"No matches for /{pattern}/ in {basePath}" + (globFilter != null ? $" (glob {globFilter})" : "") + ".", false);
+
+        var text = output.ToString().TrimEnd();
+        if (truncated)
+            text += $"\n[Stopped after {maxResults} results; narrow the pattern/glob or raise max_results.]";
+        return new ToolExecuteResult(ToolOutput.Limit(text, "grep"), false);
     }
 }

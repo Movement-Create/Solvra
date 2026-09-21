@@ -49,7 +49,7 @@ public class Tracer
 
     public Tracer(string? outputPath = null, ObservabilityLevel level = ObservabilityLevel.Normal)
     {
-        _outputPath = outputPath ?? "sessions";
+        _outputPath = outputPath ?? Solvra.Config.SolvraPaths.SessionsDir;
         _level = level;
     }
 
@@ -57,7 +57,7 @@ public class Tracer
     {
         _outputPath = outputPath != null
             ? Path.Combine(outputPath, $"{sessionId}.spans.jsonl")
-            : Path.Combine("sessions", $"{sessionId}.spans.jsonl");
+            : Path.Combine(Solvra.Config.SolvraPaths.SessionsDir, $"{sessionId}.spans.jsonl");
         _level = level;
         _rootTraceId = Guid.NewGuid().ToString("N")[..16];
     }

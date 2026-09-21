@@ -5,6 +5,7 @@ namespace Solvra.Providers;
 public record LlmResponse
 {
     public string? Text { get; init; }
+    public string? Reasoning { get; init; }
     public IReadOnlyList<ToolCall> ToolCalls { get; init; } = [];
     public required string StopReason { get; init; }
     public required TokenUsage Usage { get; init; }

@@ -94,10 +94,45 @@ public class ModelRouterTests
     }
 
     [Fact]
-    public void Resolve_ThrowsForUnknownProvider()
+    public void Resolve_UnknownPrefixIsPartOfTheModelName()
+    {
+        // Ollama tags contain a colon; only registered provider ids act as a prefix.
+        var router = CreateRouter();
+        var (provider, model) = router.Resolve("llama3.1:70b");
+        Assert.Equal("ollama", provider.Id);
+        Assert.Equal("llama3.1:70b", model);
+    }
+
+    [Fact]
+    public void Resolve_ThrowsForUnknownDefaultProvider()
     {
         var router = CreateRouter();
-        Assert.Throws<ArgumentException>(() => router.Resolve("nonexistent:model"));
+        Assert.Throws<ArgumentException>(() => router.Resolve("some-model", "nonexistent"));
+    }
+
+    [Theory]
+    [InlineData("qwen3.8-flash")]
+    [InlineData("kimi-k2.6")]
+    [InlineData("claude-sonnet-5")]
+    public void Resolve_SessionProviderBeatsNameGuessing(string model)
+    {
+        // Gateway models like qwen*/kimi* were routed to Ollama/Moonshot even with --provider openai.
+        var router = CreateRouter();
+        var (provider, resolved) = router.Resolve(model, "openai");
+        Assert.Equal("openai", provider.Id);
+        Assert.Equal(model, resolved);
+    }
+
+    [Theory]
+    [InlineData("qwen3.8-flash", "openai", null, false, "openai")]      // explicit --provider wins
+    [InlineData("qwen3.8-flash", null, "openai", true, "openai")]       // configured provider wins
+    [InlineData("qwen3.8-flash", null, "anthropic", false, "ollama")]   // built-in default: guess
+    [InlineData("anthropic:claude-opus-5", "openai", "openai", true, "anthropic")] // prefix wins
+    [InlineData("o3", null, "anthropic", false, "openai")]
+    [InlineData("gpt-5.6-luna", null, "anthropic", false, "openai")]
+    public void ChooseProvider_Precedence(string model, string? explicitProvider, string? configured, bool configuredIsExplicit, string expected)
+    {
+        Assert.Equal(expected, ModelRouter.ChooseProvider(model, explicitProvider, configured, configuredIsExplicit));
     }
 
     [Fact]
@@ -111,11 +146,11 @@ public class ModelRouterTests
     }
 
     [Theory]
-    [InlineData("anthropic", EffortLevel.Low, "claude-3-5-haiku-20241022")]
-    [InlineData("anthropic", EffortLevel.Medium, "claude-3-5-sonnet-20241022")]
-    [InlineData("anthropic", EffortLevel.Max, "claude-3-opus-20240229")]
-    [InlineData("openai", EffortLevel.Low, "gpt-4o-mini")]
-    [InlineData("openai", EffortLevel.Max, "o1-preview")]
+    [InlineData("anthropic", EffortLevel.Low, "claude-haiku-4-5")]
+    [InlineData("anthropic", EffortLevel.Medium, "claude-sonnet-5")]
+    [InlineData("anthropic", EffortLevel.Max, "claude-opus-5")]
+    [InlineData("openai", EffortLevel.Low, "gpt-4.1-mini")]
+    [InlineData("openai", EffortLevel.Max, "o3")]
     [InlineData("google", EffortLevel.Low, "gemini-2.0-flash-lite")]
     [InlineData("google", EffortLevel.Max, "gemini-2.5-pro")]
     [InlineData("ollama", EffortLevel.Low, "llama3.2")]
@@ -148,7 +183,7 @@ public class ModelRouterTests
 
         Assert.NotNull(result);
         Assert.Equal("openai", result!.Value.Provider.Id);
-        Assert.Equal("gpt-4o", result.Value.Model);
+        Assert.Equal("gpt-4.1", result.Value.Model);
     }
 
     [Fact]

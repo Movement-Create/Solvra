@@ -18,16 +18,31 @@ public enum MessageRole
 [JsonDerivedType(typeof(ToolUseContent), "tool_use")]
 [JsonDerivedType(typeof(ToolResultContent), "tool_result")]
 [JsonDerivedType(typeof(ImageContent), "image")]
+[JsonDerivedType(typeof(ReasoningContent), "reasoning")]
 public abstract record MessageContent
 {
-    [JsonPropertyName("type")]
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
     public abstract string Type { get; }
 }
 
 public record TextContent : MessageContent
 {
-    [JsonPropertyName("type")]
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
     public override string Type => "text";
+
+    [JsonPropertyName("text")]
+    public required string Text { get; init; }
+}
+
+/// <summary>
+/// Model "thinking" text returned alongside an assistant turn (OpenAI-compatible
+/// <c>reasoning_content</c>). Thinking models (Kimi, DeepSeek, GLM, Qwen) reject a follow-up
+/// request that drops it from an assistant message carrying tool calls, so it is kept and replayed.
+/// </summary>
+public record ReasoningContent : MessageContent
+{
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
+    public override string Type => "reasoning";
 
     [JsonPropertyName("text")]
     public required string Text { get; init; }
@@ -35,7 +50,7 @@ public record TextContent : MessageContent
 
 public record ToolUseContent : MessageContent
 {
-    [JsonPropertyName("type")]
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
     public override string Type => "tool_use";
 
     [JsonPropertyName("id")]
@@ -50,7 +65,7 @@ public record ToolUseContent : MessageContent
 
 public record ToolResultContent : MessageContent
 {
-    [JsonPropertyName("type")]
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
     public override string Type => "tool_result";
 
     [JsonPropertyName("tool_use_id")]
@@ -83,7 +98,7 @@ public record ImageSource
 
 public record ImageContent : MessageContent
 {
-    [JsonPropertyName("type")]
+    [JsonIgnore] // written by the polymorphic "type" discriminator; serializing it too duplicated the key
     public override string Type => "image";
 
     [JsonPropertyName("source")]

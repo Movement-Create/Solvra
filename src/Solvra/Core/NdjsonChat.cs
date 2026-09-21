@@ -68,7 +68,7 @@ public static class NdjsonChat
             _reflection = reflection;
             _sessionMgr = sessionMgr;
             // The UI owns the permission mode; a resumed session may carry an older one.
-            _sessionConfig = sessionConfig with { PermissionMode = auto ? "auto" : "default" };
+            _sessionConfig = sessionConfig with { PermissionMode = auto ? "auto" : sessionConfig.PermissionMode == "plan" ? "plan" : "default" };
             _history = history;
             _auto = auto;
             Resumed = resumed;
@@ -108,7 +108,7 @@ public static class NdjsonChat
                     break;
                 case "mode":
                     if (string.IsNullOrEmpty(cmd.Mode)) { Emit(new { t = "error", message = "missing mode" }); break; }
-                    _pendingMode = cmd.Mode.ToLowerInvariant() == "auto" ? "auto" : "ask";
+                    _pendingMode = cmd.Mode.ToLowerInvariant() switch { "auto" => "auto", "plan" => "plan", _ => "ask" };
                     Emit(new { t = "mode", mode = _pendingMode });
                     break;
                 case "interrupt":
@@ -117,6 +117,9 @@ public static class NdjsonChat
                 case "close":
                     _closed = true;
                     _sends.Writer.TryComplete();
+                    // Don't leave a turn blocked on a permission prompt nobody will answer.
+                    CancelPendingPermissions();
+                    _turnCts.Cancel();
                     break;
                 default:
                     Emit(new { t = "error", message = $"unknown command {cmd.T}" });
@@ -144,7 +147,7 @@ public static class NdjsonChat
 
         internal async Task RunAsync(CancellationToken outerCt)
         {
-            Emit(new { t = "ready", session = _sessionConfig.Id, file = _sessionConfig.FilePath is { } fp ? Path.GetFullPath(fp) : null, model = _sessionConfig.Model, provider = _sessionConfig.Provider, mode = _auto ? "auto" : "ask", resumed = Resumed });
+            Emit(new { t = "ready", session = _sessionConfig.Id, file = string.IsNullOrEmpty(_sessionConfig.FilePath) ? null : Path.GetFullPath(_sessionConfig.FilePath), model = _sessionConfig.Model, provider = _sessionConfig.Provider, mode = _auto ? "auto" : _sessionConfig.PermissionMode == "plan" ? "plan" : "ask", resumed = Resumed });
 
             var stdin = ReadStdin(outerCt);
             try
@@ -183,10 +186,10 @@ public static class NdjsonChat
         {
             _turnCts = new CancellationTokenSource();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(outerCt, _turnCts.Token);
+            // An interrupt, close or SIGTERM must also release a turn waiting on a permission answer.
+            using var releasePermissions = linked.Token.Register(CancelPendingPermissions);
 
-            // Log the prompt before the loop runs: the agent loop appends tool events as it
-            // goes, and resume rebuilds history in file order.
-            await _sessionMgr.LogUserMessageAsync(_sessionConfig, prompt);
+            // The agent loop logs the prompt, assistant turns and tool results in order.
             Emit(new { t = "start" });
             var streamed = new System.Text.StringBuilder();
             try
@@ -204,10 +207,13 @@ public static class NdjsonChat
                 }, linked.Token);
 
                 _history = [.. result.Messages];
-                await _sessionMgr.LogAssistantMessageAsync(_sessionConfig, result.Text);
+                if (result.StopReason == StopReason.Error)
+                    Emit(new { t = "error", message = result.Error ?? result.Text });
                 Emit(new
                 {
                     t = "turn_end",
+                    isError = result.StopReason == StopReason.Error,
+                    message = result.Error,
                     turns = result.Turns,
                     costUsd = result.CostUsd,
                     input = result.Usage.InputTokens,
@@ -235,6 +241,7 @@ public static class NdjsonChat
         private async Task EndFailedTurnAsync(string prompt, string partial, string note)
         {
             var reply = string.IsNullOrWhiteSpace(partial) ? note : $"{partial}\n\n{note}";
+            // The loop already logged the prompt; only the closing assistant note is written here.
             _history.Add(Message.FromText(MessageRole.User, prompt));
             _history.Add(Message.FromText(MessageRole.Assistant, reply));
             try { await _sessionMgr.LogAssistantMessageAsync(_sessionConfig, reply); }
@@ -258,8 +265,7 @@ public static class NdjsonChat
                 _pendingModel = null;
                 // "provider:model" pins the provider (gateway models such as kimi-* or qwen* would
                 // otherwise be routed by name to Moonshot or Ollama).
-                var colon = model.IndexOf(':');
-                var provider = colon > 0 ? model[..colon] : ModelRouter.DetectProvider(model) ?? _sessionConfig.Provider;
+                var provider = ModelRouter.ChooseProvider(model, null, _sessionConfig.Provider, configuredIsExplicit: true);
                 _sessionConfig = _sessionConfig with { Model = model, Provider = provider };
             }
             var mode = _pendingMode;
@@ -267,7 +273,7 @@ public static class NdjsonChat
             {
                 _pendingMode = null;
                 _auto = mode == "auto";
-                _sessionConfig = _sessionConfig with { PermissionMode = _auto ? "auto" : "default" };
+                _sessionConfig = _sessionConfig with { PermissionMode = mode switch { "auto" => "auto", "plan" => "plan", _ => "default" } };
             }
         }
 

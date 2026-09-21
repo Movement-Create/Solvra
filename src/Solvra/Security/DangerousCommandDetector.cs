@@ -6,74 +6,128 @@ namespace Solvra.Security;
 
 public record DangerousCommandResult(bool Dangerous, string? Reason);
 
+/// <summary>
+/// Best-effort screen for obviously destructive shell commands. It is a guard rail against
+/// model mistakes, not a security boundary: a determined command can always be obfuscated.
+/// Patterns aim at commands that destroy data outside the task (home dir, system paths, git
+/// history, remote branches) while leaving ordinary build/test commands alone.
+/// </summary>
 public class DangerousCommandDetector
 {
+    // Start of a simple command: beginning, or after ; & | ( ` $( and an optional sudo/env prefix.
+    private const string Cmd = @"(?:^|[;&|(`]\s*|\$\(\s*)(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?";
+
     private static readonly List<(Regex Pattern, string Reason)> DirectPatterns = new()
     {
-        // Filesystem destruction
-        (new Regex(@"rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+).*/", RegexOptions.Compiled), "Forced recursive delete"),
-        (new Regex(@"rm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+|--recursive\s+).*/", RegexOptions.Compiled), "Recursive delete from root-adjacent path"),
-        (new Regex(@">\s*/dev/sd[a-z]", RegexOptions.Compiled), "Direct write to disk device"),
-        (new Regex(@"dd\s+.*of=/dev/", RegexOptions.Compiled), "dd to disk device"),
-        (new Regex(@"mkfs\.", RegexOptions.Compiled), "Filesystem format"),
-        (new Regex(@"fdisk\s", RegexOptions.Compiled), "Disk partition modification"),
+        // Disk / filesystem destruction
+        (new Regex(@">\s*/dev/(sd[a-z]|nvme\d|vd[a-z]|xvd[a-z]|disk\d)", RegexOptions.Compiled), "Direct write to disk device"),
+        (new Regex(@"\bdd\s+.*\bof=/dev/(sd|nvme|vd|xvd|disk|hd)", RegexOptions.Compiled), "dd to disk device"),
+        (new Regex(Cmd + @"mkfs(\.\w+)?\b", RegexOptions.Compiled), "Filesystem format"),
+        (new Regex(Cmd + @"(fdisk|sfdisk|parted|wipefs)\s", RegexOptions.Compiled), "Disk partition modification"),
+        (new Regex(@"\bfind\s+(/|~|\$HOME)(\s|$)[^;|&]*(-delete\b|-exec\s+rm\b)", RegexOptions.Compiled), "find -delete over / or home"),
+        (new Regex(Cmd + @"chmod\s+(-R\s+|--recursive\s+)?(0?777|a\+rwx)\s+(/|~|\$HOME)", RegexOptions.Compiled), "World-writable permissions on system or home path"),
+        (new Regex(Cmd + @"chown\s+(-R\s+)?\S+\s+/(etc|usr|bin|boot|lib|sbin)\b", RegexOptions.Compiled), "Ownership change on system path"),
 
-        // Fork/resource bombs
+        // Fork bomb
         (new Regex(@":\(\)\s*\{.*\|.*&\s*\}\s*;", RegexOptions.Compiled), "Fork bomb"),
-        (new Regex(@"while\s+true.*do.*done", RegexOptions.Compiled), "Infinite loop (review manually)"),
 
         // Remote code execution
-        (new Regex(@"curl\s[^|]*\|\s*(bash|sh|zsh|python|perl|ruby)", RegexOptions.Compiled), "Curl pipe to interpreter"),
-        (new Regex(@"wget\s[^|]*\|\s*(bash|sh|zsh|python|perl|ruby)", RegexOptions.Compiled), "Wget pipe to interpreter"),
-        (new Regex(@"curl\s[^|]*>\s*/tmp/[^;]*;\s*(bash|sh|chmod)", RegexOptions.Compiled), "Download and execute pattern"),
+        (new Regex(@"\b(curl|wget)\s[^|;]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b", RegexOptions.Compiled), "Download piped to shell"),
+        (new Regex(@"\b(curl|wget)\s[^|;]*\|\s*(sudo\s+)?(python\d?|perl|ruby|node)\b", RegexOptions.Compiled), "Download piped to interpreter"),
+        (new Regex(@"\b(ba|z)?sh\s+(-c\s+)?[""']?\$\(\s*(curl|wget)\b", RegexOptions.Compiled), "Shell running downloaded code"),
+        (new Regex(@"\b(ba|z)?sh\s+<\(\s*(curl|wget)\b", RegexOptions.Compiled), "Shell running downloaded code"),
+        (new Regex(@"\beval\s+[""']?\$\(\s*(curl|wget)\b", RegexOptions.Compiled), "Eval of downloaded code"),
+        (new Regex(@"\$\([^)]*\)\s*\|\s*(sudo\s+)?(ba|z)?sh\b", RegexOptions.Compiled), "Command substitution piped to shell"),
+        (new Regex(@"\b(curl|wget)\s[^;]*(>|-o|-O)\s*(?<f>/tmp/\S+)[^;]*;\s*((ba)?sh|chmod\s+\+x)\s+\k<f>", RegexOptions.Compiled), "Download and execute"),
 
-        // Eval / injection
-        (new Regex(@"eval\s+[""'`$]", RegexOptions.Compiled), "Eval with dynamic input"),
-        (new Regex(@"\$\(.*\)\s*\|\s*(bash|sh)", RegexOptions.Compiled), "Command substitution piped to shell"),
+        // Git history / remote destruction
+        (new Regex(Cmd + @"git\s+(-C\s+\S+\s+)?push\s+([^;&|]*\s)?(--force(-with-lease)?|-f)\b", RegexOptions.Compiled), "git push --force (rewrites remote history)"),
+        (new Regex(Cmd + @"git\s+(-C\s+\S+\s+)?reset\s+([^;&|]*\s)?--hard\b", RegexOptions.Compiled), "git reset --hard (discards uncommitted work)"),
+        (new Regex(Cmd + @"git\s+(-C\s+\S+\s+)?clean\s+([^;&|]*\s)?-[a-zA-Z]*(f[a-zA-Z]*d|d[a-zA-Z]*f)", RegexOptions.Compiled), "git clean -fd (deletes untracked files)"),
 
-        // Credential / system compromise
-        (new Regex(@"passwd\s", RegexOptions.Compiled), "Password modification"),
-        (new Regex(@"chmod\s+(0?777|a\+rwx)\s+/", RegexOptions.Compiled), "World-writable permissions on system path"),
-        (new Regex(@"chown\s+.*/etc", RegexOptions.Compiled), "Ownership change on system config"),
+        // Accounts
+        (new Regex(Cmd + @"(passwd|chpasswd|usermod|userdel)\b", RegexOptions.Compiled), "Account modification"),
 
-        // Network exfiltration indicators
-        (new Regex(@"nc\s+-[a-zA-Z]*l[a-zA-Z]*\s", RegexOptions.Compiled), "Netcat listener"),
+        // Network backdoors
+        (new Regex(@"\bnc(at)?\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*[le][a-zA-Z]*(\s|$)", RegexOptions.Compiled), "Netcat listener / exec"),
         (new Regex(@"/dev/(tcp|udp)/", RegexOptions.Compiled), "Bash network device"),
     };
 
     private static readonly Regex Base64ExecPattern = new(
-        @"echo\s+[A-Za-z0-9+/=]{8,}\s*\|\s*base64\s+-d\s*\|\s*(bash|sh)",
+        @"base64\s+(-d|--decode)\b[^;]*\|\s*(sudo\s+)?(ba|z)?sh\b",
         RegexOptions.Compiled);
 
     private static readonly Regex ScriptExecPattern = new(
-        @"python[23]?\s+-c\s+[""'].*(?:os\.system|subprocess|exec|__import__).*[""']",
+        @"python[23]?\s+-c\s+.*(os\.system|subprocess)\S*\(\s*.*rm\s+-[a-zA-Z]*r[a-zA-Z]*\s+(/|~)|shutil\.rmtree\(\s*['""](/|~)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex RmCommand = new(Cmd + @"rm\s+(?<args>[^;&|`)]*)", RegexOptions.Compiled);
+
+    private static readonly HashSet<string> CatastrophicTargets = new(StringComparer.Ordinal)
+    {
+        "/", "/*", "~", "~/", "~/*", "$HOME", "$HOME/", "$HOME/*", "${HOME}", "${HOME}/",
+        ".", "./", "..", "../", "*", ".*", "./*", "../*",
+    };
+
+    private static readonly Regex SystemPath = new(
+        @"^/(bin|boot|dev|etc|home|lib|lib32|lib64|opt|proc|root|sbin|srv|sys|usr|var|mnt|media|snap)(/\*?)?$",
         RegexOptions.Compiled);
 
     public DangerousCommandResult Detect(string command)
     {
         var normalized = Regex.Replace(command, @"\s+", " ").Trim();
 
-        // Layer 1: Direct pattern matching
         foreach (var (pattern, reason) in DirectPatterns)
         {
             if (pattern.IsMatch(normalized))
-            {
                 return new DangerousCommandResult(true, reason);
-            }
         }
 
-        // Layer 2: Base64-encoded command execution
+        var rm = CheckRm(normalized);
+        if (rm != null) return new DangerousCommandResult(true, rm);
+
         if (Base64ExecPattern.IsMatch(normalized))
-        {
             return new DangerousCommandResult(true, "Base64-encoded command execution");
-        }
 
-        // Layer 3: Script interpreter system calls
         if (ScriptExecPattern.IsMatch(normalized))
-        {
-            return new DangerousCommandResult(true, "Script interpreter system call");
-        }
+            return new DangerousCommandResult(true, "Script interpreter deleting system or home paths");
 
         return new DangerousCommandResult(false, null);
+    }
+
+    /// <summary>Recursive rm aimed at /, home, the whole working tree, or a system directory.</summary>
+    private static string? CheckRm(string normalized)
+    {
+        foreach (Match m in RmCommand.Matches(normalized))
+        {
+            var tokens = m.Groups["args"].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var recursive = false;
+            var targets = new List<string>();
+            var endOfOptions = false;
+            foreach (var t in tokens)
+            {
+                if (!endOfOptions && t == "--") { endOfOptions = true; continue; }
+                if (!endOfOptions && t.StartsWith("--"))
+                {
+                    if (t == "--recursive") recursive = true;
+                    if (t == "--no-preserve-root") return "rm --no-preserve-root";
+                    continue;
+                }
+                if (!endOfOptions && t.StartsWith('-') && t.Length > 1)
+                {
+                    if (t.IndexOfAny(['r', 'R']) >= 0) recursive = true;
+                    continue;
+                }
+                targets.Add(t.Trim('\'', '"'));
+            }
+
+            if (!recursive) continue;
+            foreach (var target in targets)
+            {
+                if (CatastrophicTargets.Contains(target)) return $"Recursive delete of '{target}'";
+                if (SystemPath.IsMatch(target)) return $"Recursive delete of system path '{target}'";
+            }
+        }
+        return null;
     }
 }

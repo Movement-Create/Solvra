@@ -26,11 +26,29 @@ public class WebhookServer : IAsyncDisposable
     /// </summary>
     public Func<string, string, CancellationToken, Task<(string Text, int Turns)>>? RunAgentDelegate { get; set; }
 
-    public WebhookServer(int port = 7331, string? secret = null)
+    /// <param name="host">
+    /// Bind address. Defaults to loopback: put a reverse proxy (e.g. Tailscale Serve) in front
+    /// for remote access. "+", "*" or "0.0.0.0" bind every interface.
+    /// </param>
+    public WebhookServer(int port = 7331, string? secret = null, string host = "127.0.0.1")
     {
         _secret = secret ?? Environment.GetEnvironmentVariable("SOLVRA_WEBHOOK_SECRET") ?? "";
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://+:{port}/");
+        // HttpListener matches the Host header against the prefix, so a "127.0.0.1" prefix would
+        // reject requests forwarded by a local reverse proxy (Tailscale Serve keeps the public host
+        // name). Listen with a wildcard prefix and enforce the bind address on the peer instead.
+        _loopbackOnly = host is "127.0.0.1" or "localhost" or "::1" or "[::1]";
+        var prefixHost = _loopbackOnly || host is "0.0.0.0" or "*" or "+" ? "+" : host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
+        _listener.Prefixes.Add($"http://{prefixHost}:{port}/");
+    }
+
+    private readonly bool _loopbackOnly;
+
+    private static bool SecretMatches(string? header, string secret)
+    {
+        var expected = System.Text.Encoding.UTF8.GetBytes($"Bearer {secret}");
+        var actual = System.Text.Encoding.UTF8.GetBytes(header ?? "");
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, actual);
     }
 
     public void Start()
@@ -80,6 +98,12 @@ public class WebhookServer : IAsyncDisposable
 
         try
         {
+            if (_loopbackOnly && request.RemoteEndPoint is { } peer && !IPAddress.IsLoopback(peer.Address))
+            {
+                await WriteResponse(response, 403, new { error = "Forbidden: webhook accepts local connections only (use --host to change)." });
+                return;
+            }
+
             // Only accept POST /trigger
             if (request.HttpMethod != "POST" || request.Url?.AbsolutePath != "/trigger")
             {
@@ -91,7 +115,7 @@ public class WebhookServer : IAsyncDisposable
             if (!string.IsNullOrEmpty(_secret))
             {
                 var authHeader = request.Headers["Authorization"];
-                if (authHeader != $"Bearer {_secret}")
+                if (!SecretMatches(authHeader, _secret))
                 {
                     await WriteResponse(response, 401, new { error = "Unauthorized" });
                     return;

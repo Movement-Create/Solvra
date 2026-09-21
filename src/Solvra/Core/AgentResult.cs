@@ -22,6 +22,12 @@ public record AgentRunOptions
     public Action<ToolCall>? OnToolCall { get; init; }
     public Action<ToolResult>? OnToolResult { get; init; }
     public int SubagentDepth { get; init; }
+
+    /// <summary>Working directory for tools and project instructions (default: process cwd).</summary>
+    public string? Cwd { get; init; }
+
+    /// <summary>Write the prompt, assistant turns and tool results to the session file.</summary>
+    public bool LogToSession { get; init; } = true;
 }
 
 public record AgentRunResult
@@ -32,6 +38,9 @@ public record AgentRunResult
     public required decimal CostUsd { get; init; }
     public required StopReason StopReason { get; init; }
     public required IReadOnlyList<Message> Messages { get; init; }
+
+    /// <summary>Provider/harness error that ended the run (StopReason.Error).</summary>
+    public string? Error { get; init; }
 }
 
 public record SessionConfig
@@ -39,7 +48,7 @@ public record SessionConfig
     public required string Id { get; init; }
     public string? Title { get; init; }
     public required string CreatedAt { get; init; }
-    public string Model { get; init; } = "claude-3-5-sonnet-20241022";
+    public string Model { get; init; } = "claude-sonnet-5";
     public string Provider { get; init; } = "anthropic";
     public string? SystemPrompt { get; init; }
     public IReadOnlyList<string> AllowedTools { get; init; } = [];
@@ -47,6 +56,7 @@ public record SessionConfig
     public string PermissionMode { get; init; } = "default";
     public EffortLevel Effort { get; init; } = EffortLevel.Medium;
     public int MaxTurns { get; init; } = 50;
-    public decimal MaxBudgetUsd { get; init; } = 1.0m;
+    public decimal MaxBudgetUsd { get; init; } = 5.0m;
+    public int MaxTokens { get; init; } = 8192;
     public string FilePath { get; init; } = "";
 }

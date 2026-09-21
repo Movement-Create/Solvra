@@ -93,6 +93,11 @@ public static class Summarizer
                     sb.AppendLine($"- Tool call: `{toolName}`");
                     break;
 
+                case "assistant_turn":
+                    foreach (var (name, _) in ToolCallsInTurn(evt))
+                        sb.AppendLine($"- Tool call: `{name}`");
+                    break;
+
                 case "tool_result":
                     var isError = evt.Data.TryGetProperty("is_error", out var ie) && ie.GetBoolean();
                     var output = evt.Data.TryGetProperty("output", out var o) ? o.GetString() ?? "" : "";
@@ -103,7 +108,12 @@ public static class Summarizer
         }
 
         // P6: Tool usage aggregation
-        var toolCallEvents = events.Where(e => e.Type == "tool_call").ToList();
+        var toolCalls = events.Where(e => e.Type == "tool_call")
+            .Select(e => (Name: e.Data.TryGetProperty("tool_name", out var tn) ? tn.GetString() ?? "unknown" : "unknown",
+                          Id: e.Data.TryGetProperty("call_id", out var ci) ? ci.GetString() ?? "" : ""))
+            .Concat(events.Where(e => e.Type == "assistant_turn").SelectMany(ToolCallsInTurn))
+            .ToList();
+        var toolCallEvents = toolCalls;
         var toolResultEvents = events.Where(e => e.Type == "tool_result").ToList();
 
         if (toolCallEvents.Count > 0)
@@ -113,15 +123,11 @@ public static class Summarizer
             sb.AppendLine("| Tool | Calls | Errors |");
             sb.AppendLine("|------|-------|--------|");
 
-            var toolGroups = toolCallEvents
-                .GroupBy(e => e.Data.TryGetProperty("tool_name", out var tn) ? tn.GetString() ?? "unknown" : "unknown");
+            var toolGroups = toolCalls.GroupBy(c => c.Name);
 
             foreach (var group in toolGroups)
             {
-                var callIds = group
-                    .Select(e => e.Data.TryGetProperty("call_id", out var ci) ? ci.GetString() ?? "" : "")
-                    .Where(id => !string.IsNullOrEmpty(id))
-                    .ToHashSet();
+                var callIds = group.Select(c => c.Id).Where(id => !string.IsNullOrEmpty(id)).ToHashSet();
 
                 var errorCount = toolResultEvents.Count(e =>
                 {
@@ -188,6 +194,20 @@ public static class Summarizer
         await File.WriteAllTextAsync(summaryPath, summary);
 
         return summary;
+    }
+
+    private static IEnumerable<(string Name, string Id)> ToolCallsInTurn(SessionEventRecord evt)
+    {
+        if (!evt.Data.TryGetProperty("content", out var content) || content.ValueKind != System.Text.Json.JsonValueKind.Array)
+            yield break;
+        foreach (var block in content.EnumerateArray())
+        {
+            if (block.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            if (!block.TryGetProperty("type", out var t) || t.GetString() != "tool_use") continue;
+            var name = block.TryGetProperty("name", out var n) ? n.GetString() ?? "unknown" : "unknown";
+            var id = block.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+            yield return (name, id);
+        }
     }
 
     private static string Truncate(string text, int maxLength)

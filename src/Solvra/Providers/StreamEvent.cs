@@ -8,6 +8,9 @@ public abstract record StreamEvent;
 /// <summary>A chunk of assistant text.</summary>
 public sealed record StreamText(string Delta) : StreamEvent;
 
+/// <summary>A chunk of model reasoning ("thinking") text.</summary>
+public sealed record StreamReasoning(string Delta) : StreamEvent;
+
 /// <summary>Start of a tool_use content block.</summary>
 public sealed record StreamToolUseStart(string Id, string Name) : StreamEvent;
 

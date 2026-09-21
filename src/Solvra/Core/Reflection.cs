@@ -13,9 +13,17 @@ public sealed class Reflection
         "call memory_note with kind='lesson' and short relevant tags (file paths, tool names, topics). " +
         "If nothing is worth saving, reply with just 'done'.";
 
-    public Reflection(AgentLoop agentLoop)
+    private readonly bool _enabled;
+
+    /// <param name="enabled">
+    /// Off by default (config "reflection": true / SOLVRA_REFLECTION=1 turns it on): the pass
+    /// re-runs the agent loop after the task, which costs a model call and used to be able to
+    /// fail a run whose real work had already succeeded.
+    /// </param>
+    public Reflection(AgentLoop agentLoop, bool enabled = false)
     {
         _agentLoop = agentLoop;
+        _enabled = enabled;
     }
 
     public async Task<AgentRunResult> RunAgentWithReflectionAsync(
@@ -24,33 +32,41 @@ public sealed class Reflection
     {
         var result = await _agentLoop.RunAsync(options, ct);
 
-        if (!ShouldReflect(result))
+        if (!_enabled || !ShouldReflect(result))
             return result;
 
-        // Run reflection turn (silenced — no onText callback)
-        var reflectionResult = await _agentLoop.RunAsync(new AgentRunOptions
+        AgentRunResult reflectionResult;
+        try
         {
-            Prompt = ReflectionPrompt,
-            Session = options.Session,
-            SystemPrompt = options.SystemPrompt,
-            History = result.Messages,
-            Streaming = false,
-            OnText = null,
-            OnPermissionRequest = options.OnPermissionRequest,
-            OnToolCall = null,
-            OnToolResult = null,
-            SubagentDepth = options.SubagentDepth
-        }, ct);
+            // Silent, unlogged, and limited to a few turns; only memory tools matter here.
+            reflectionResult = await _agentLoop.RunAsync(new AgentRunOptions
+            {
+                Prompt = ReflectionPrompt,
+                Session = options.Session with { MaxTurns = 3, AllowedTools = ["memory_note", "memory_recall"] },
+                SystemPrompt = options.SystemPrompt,
+                History = result.Messages,
+                Streaming = false,
+                OnText = null,
+                OnPermissionRequest = options.OnPermissionRequest,
+                OnToolCall = null,
+                OnToolResult = null,
+                SubagentDepth = options.SubagentDepth,
+                Cwd = options.Cwd,
+                LogToSession = false
+            }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"[reflection] skipped: {ex.Message}");
+            return result;
+        }
 
-        // Combine results: primary text, combined usage/cost/turns
-        return new AgentRunResult
+        // The reflection exchange is bookkeeping: keep it out of the conversation history.
+        return result with
         {
-            Text = result.Text,
             Turns = result.Turns + reflectionResult.Turns,
             Usage = result.Usage + reflectionResult.Usage,
             CostUsd = result.CostUsd + reflectionResult.CostUsd,
-            StopReason = result.StopReason,
-            Messages = reflectionResult.Messages
         };
     }
 

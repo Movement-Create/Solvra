@@ -10,6 +10,7 @@ public interface IToolRegistry
     void RegisterTool(ITool tool);
     void RegisterBuiltins(Security.SandboxManager sandbox);
     IReadOnlyList<Models.ToolDefinition> GetToolDefinitions();
+    ITool? GetTool(string name);
     Task<ToolExecuteResult> ExecuteToolAsync(string name, JsonElement input, ToolExecutionContext context, CancellationToken ct = default);
 
     /// <summary>

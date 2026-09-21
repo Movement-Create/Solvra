@@ -76,7 +76,7 @@ public static partial class ConfigLoader
                 result = result with { Model = modelProp.GetString()! };
 
             if (json.TryGetProperty("provider", out var providerProp) && providerProp.ValueKind == JsonValueKind.String)
-                result = result with { Provider = providerProp.GetString()! };
+                result = result with { Provider = providerProp.GetString()!, ProviderIsExplicit = true };
 
             if (json.TryGetProperty("effort", out var effortProp) && effortProp.ValueKind == JsonValueKind.String)
                 result = result with { Effort = effortProp.GetString()! };
@@ -120,6 +120,29 @@ public static partial class ConfigLoader
                 result = result with { DisallowedTools = tools };
             }
 
+            if (json.TryGetProperty("reflection", out var reflProp) && reflProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                result = result with { Reflection = reflProp.GetBoolean() };
+
+            if (json.TryGetProperty("max_tokens", out var maxTokProp) && maxTokProp.ValueKind == JsonValueKind.Number)
+                result = result with { MaxTokens = maxTokProp.GetInt32() };
+
+            if (json.TryGetProperty("hooks", out var hooksProp) && hooksProp.ValueKind == JsonValueKind.Object)
+            {
+                static List<string> Commands(JsonElement obj, string name) =>
+                    obj.TryGetProperty(name, out var arr) && arr.ValueKind == JsonValueKind.Array
+                        ? arr.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToList()
+                        : [];
+                result = result with
+                {
+                    Hooks = new HooksConfig
+                    {
+                        PreToolUse = Commands(hooksProp, "PreToolUse"),
+                        PostToolUse = Commands(hooksProp, "PostToolUse"),
+                        Stop = Commands(hooksProp, "Stop"),
+                    }
+                };
+            }
+
             if (json.TryGetProperty("webhook_secret", out var webhookProp) && webhookProp.ValueKind == JsonValueKind.String)
                 result = result with { WebhookSecret = webhookProp.GetString() };
 
@@ -147,8 +170,10 @@ public static partial class ConfigLoader
 
             return result;
         }
-        catch
+        catch (Exception ex)
         {
+            // Never drop a broken config silently: the user would run with defaults unknowingly.
+            Console.Error.WriteLine($"[config] Ignoring {path}: {ex.Message}");
             return current;
         }
     }
@@ -167,14 +192,19 @@ public static partial class ConfigLoader
         var otelEndpoint = Environment.GetEnvironmentVariable("SOLVRA_OTEL_ENDPOINT");
         var sessionsDir = Environment.GetEnvironmentVariable("SOLVRA_SESSIONS_DIR");
         var memoryDir = Environment.GetEnvironmentVariable("SOLVRA_MEMORY_DIR");
+        var reflection = Environment.GetEnvironmentVariable("SOLVRA_REFLECTION");
+        var maxTokens = Environment.GetEnvironmentVariable("SOLVRA_MAX_TOKENS");
 
         return config with
         {
             Model = !string.IsNullOrEmpty(model) ? model : config.Model,
             Provider = !string.IsNullOrEmpty(provider) ? provider : config.Provider,
+            ProviderIsExplicit = config.ProviderIsExplicit || !string.IsNullOrEmpty(provider),
             Effort = !string.IsNullOrEmpty(effort) ? effort : config.Effort,
             MaxTurns = int.TryParse(maxTurns, out var mt) ? mt : config.MaxTurns,
-            MaxBudgetUsd = decimal.TryParse(maxBudget, out var mb) ? mb : config.MaxBudgetUsd,
+            MaxBudgetUsd = decimal.TryParse(maxBudget, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : config.MaxBudgetUsd,
+            Reflection = reflection is "1" or "true" ? true : reflection is "0" or "false" ? false : config.Reflection,
+            MaxTokens = int.TryParse(maxTokens, out var mtk) && mtk > 0 ? mtk : config.MaxTokens,
             PermissionMode = !string.IsNullOrEmpty(permMode) ? permMode : config.PermissionMode,
             SystemPrompt = !string.IsNullOrEmpty(sysPrompt) ? sysPrompt : config.SystemPrompt,
             SessionsDir = !string.IsNullOrEmpty(sessionsDir) ? sessionsDir : config.SessionsDir,
@@ -188,22 +218,41 @@ public static partial class ConfigLoader
         };
     }
 
+    /// <summary>
+    /// Remove // and /* */ comments and trailing commas, leaving string contents alone
+    /// (the old regex version cut "https://..." URLs in half and broke the whole file).
+    /// </summary>
     internal static string StripJson5(string input)
     {
-        // Remove single-line comments
-        var result = SingleLineCommentRegex().Replace(input, "");
-        // Remove multi-line comments
-        result = MultiLineCommentRegex().Replace(result, "");
-        // Remove trailing commas before } or ]
-        result = TrailingCommaRegex().Replace(result, "$1");
-        return result;
+        var sb = new System.Text.StringBuilder(input.Length);
+        var inString = false;
+        for (var i = 0; i < input.Length; i++)
+        {
+            var c = input[i];
+            if (inString)
+            {
+                sb.Append(c);
+                if (c == '\\' && i + 1 < input.Length) { sb.Append(input[++i]); continue; }
+                if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; sb.Append(c); continue; }
+            if (c == '/' && i + 1 < input.Length && input[i + 1] == '/')
+            {
+                while (i < input.Length && input[i] != '\n') i++;
+                if (i < input.Length) sb.Append('\n');
+                continue;
+            }
+            if (c == '/' && i + 1 < input.Length && input[i + 1] == '*')
+            {
+                var end = input.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? input.Length : end + 1;
+                continue;
+            }
+            sb.Append(c);
+        }
+        return TrailingCommaRegex().Replace(sb.ToString(), "$1");
     }
-
-    [GeneratedRegex(@"//[^\n]*")]
-    private static partial Regex SingleLineCommentRegex();
-
-    [GeneratedRegex(@"/\*[\s\S]*?\*/")]
-    private static partial Regex MultiLineCommentRegex();
 
     [GeneratedRegex(@",\s*([\]}])")]
     private static partial Regex TrailingCommaRegex();

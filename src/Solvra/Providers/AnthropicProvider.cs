@@ -15,6 +15,15 @@ public sealed class AnthropicProvider : IProvider
 
     private static readonly Dictionary<string, (decimal Input, decimal Output)> Pricing = new()
     {
+        ["claude-fable-5-1"] = (10m, 50m),
+        ["claude-fable-5"] = (10m, 50m),
+        ["claude-opus-5"] = (5m, 25m),
+        ["claude-opus-4-8"] = (5m, 25m),
+        ["claude-opus-4-7"] = (5m, 25m),
+        ["claude-opus-4-6"] = (5m, 25m),
+        ["claude-sonnet-5"] = (2m, 10m),
+        ["claude-sonnet-4-6"] = (3m, 15m),
+        ["claude-haiku-4-5"] = (1m, 5m),
         ["claude-3-5-sonnet-20241022"] = (3m, 15m),
         ["claude-3-5-haiku-20241022"] = (0.8m, 4m),
         ["claude-3-opus-20240229"] = (15m, 75m),
@@ -181,11 +190,12 @@ public sealed class AnthropicProvider : IProvider
     {
         return
         [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307"
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-haiku-4-5",
+            "claude-fable-5-1",
+            "claude-opus-4-8",
+            "claude-sonnet-4-6"
         ];
     }
 
@@ -198,7 +208,7 @@ public sealed class AnthropicProvider : IProvider
             using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl);
             var body = new JsonObject
             {
-                ["model"] = "claude-3-haiku-20240307",
+                ["model"] = "claude-haiku-4-5",
                 ["max_tokens"] = 1,
                 ["messages"] = new JsonArray
                 {

@@ -92,6 +92,34 @@ public sealed class SessionManager
     }
 
     /// <summary>
+    /// Log a complete assistant turn (text, reasoning and tool calls) in order, so resume
+    /// rebuilds exactly what the model saw. Replaces separate tool_call events.
+    /// </summary>
+    public async Task LogAssistantTurnAsync(SessionConfig session, Message message)
+    {
+        // Default options on both sides: content blocks round-trip through their own attributes.
+        var data = JsonSerializer.SerializeToElement(new { content = message.Content });
+        await AppendEventAsync(session, new SessionEvent
+        {
+            Type = "assistant_turn",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            Data = data
+        });
+    }
+
+    /// <summary>Session ids are file names: letters, digits, '.', '_' and '-' only.</summary>
+    public static bool IsValidSessionId(string sessionId) =>
+        !string.IsNullOrWhiteSpace(sessionId) && sessionId.Length <= 128 && !sessionId.Contains("..") &&
+        sessionId.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+
+    private string SessionPath(string sessionId)
+    {
+        if (!IsValidSessionId(sessionId))
+            throw new ArgumentException($"Invalid session id: {sessionId}");
+        return Path.Combine(_sessionsDir, $"{sessionId}.jsonl");
+    }
+
+    /// <summary>
     /// Fix 5f: Write a tool_call event to the session JSONL.
     /// </summary>
     public async Task AppendToolCallAsync(SessionConfig session, string toolName, JsonElement input, string callId)
@@ -156,7 +184,7 @@ public sealed class SessionManager
     /// </summary>
     public async Task<SessionInfo> ResumeAsync(string sessionId)
     {
-        var filePath = Path.Combine(_sessionsDir, $"{sessionId}.jsonl");
+        var filePath = SessionPath(sessionId);
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Session not found: {sessionId}");
 
@@ -172,7 +200,9 @@ public sealed class SessionManager
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
 
-            var evt = JsonSerializer.Deserialize<SessionEvent>(line, JsonOptions);
+            SessionEvent? evt;
+            try { evt = JsonSerializer.Deserialize<SessionEvent>(line, JsonOptions); }
+            catch (JsonException) { continue; } // a torn/corrupt line must not lose the whole session
             if (evt == null) continue;
 
             switch (evt.Type)
@@ -204,7 +234,20 @@ public sealed class SessionManager
                     }
                     break;
 
+                case "assistant_turn":
+                    FlushToolMessages(messages, ref pendingToolUses, ref pendingToolResults);
+                    if (evt.Data.TryGetProperty("content", out var turnContent) && turnContent.ValueKind == JsonValueKind.Array)
+                    {
+                        List<MessageContent>? blocks = null;
+                        try { blocks = JsonSerializer.Deserialize<List<MessageContent>>(turnContent.GetRawText()); }
+                        catch (JsonException) { }
+                        if (blocks is { Count: > 0 })
+                            messages.Add(new Message { Role = MessageRole.Assistant, Content = blocks, Timestamp = evt.Timestamp });
+                    }
+                    break;
+
                 case "tool_call":
+                    // Older session files: tool calls logged one by one.
                     // If we have pending tool results, flush them first
                     if (pendingToolResults.Count > 0)
                         FlushToolMessages(messages, ref pendingToolUses, ref pendingToolResults);
@@ -231,7 +274,7 @@ public sealed class SessionManager
                 case "tool_result":
                     var resultCallId = evt.Data.TryGetProperty("call_id", out var rci) ? rci.GetString() ?? "" : "";
                     var output = evt.Data.TryGetProperty("output", out var o) ? o.GetString() ?? "" : "";
-                    var isError = evt.Data.TryGetProperty("is_error", out var ie) && ie.GetBoolean();
+                    var isError = evt.Data.TryGetProperty("is_error", out var ie) && ie.ValueKind == JsonValueKind.True;
 
                     pendingToolResults.Add(new ToolResultContent
                     {
@@ -320,7 +363,7 @@ public sealed class SessionManager
 
     public Task DeleteAsync(string sessionId)
     {
-        var filePath = Path.Combine(_sessionsDir, $"{sessionId}.jsonl");
+        var filePath = SessionPath(sessionId);
         if (File.Exists(filePath))
             File.Delete(filePath);
         return Task.CompletedTask;

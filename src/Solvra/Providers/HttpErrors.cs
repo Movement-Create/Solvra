@@ -15,7 +15,13 @@ public static class HttpErrors
         string body;
         try { body = await response.Content.ReadAsStringAsync(ct); }
         catch { body = ""; }
-        throw new HttpRequestException(Describe(provider, response.StatusCode, body), null, response.StatusCode);
+        var ex = new HttpRequestException(Describe(provider, response.StatusCode, body), null, response.StatusCode);
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta)
+            ex.Data["RetryAfterSeconds"] = (int)Math.Ceiling(delta.TotalSeconds);
+        else if (retryAfter?.Date is { } date)
+            ex.Data["RetryAfterSeconds"] = Math.Max(0, (int)Math.Ceiling((date - DateTimeOffset.UtcNow).TotalSeconds));
+        throw ex;
     }
 
     /// <summary>Build a readable one-line error from a status code and an (optionally JSON) error body.</summary>

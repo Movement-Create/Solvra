@@ -60,7 +60,7 @@ public class ToolRegistry : IToolRegistry
     {
         var tool = GetTool(name);
         if (tool == null)
-            return new ToolExecuteResult($"Tool \"{name}\" not found", true);
+            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", _tools.Keys.OrderBy(k => k))}", true);
 
         if (!IsToolAllowed(name, context.Session))
             return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);
@@ -70,6 +70,10 @@ public class ToolRegistry : IToolRegistry
         try
         {
             result = await tool.ExecuteAsync(input, context, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -95,20 +99,31 @@ public class ToolRegistry : IToolRegistry
     {
         var tool = GetTool(name);
         if (tool == null)
-            return new ToolExecuteResult($"Tool \"{name}\" not found", true);
+            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", _tools.Keys.OrderBy(k => k))}", true);
 
         if (!IsToolAllowed(name, context.Session))
             return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);
 
         var permissionGranted = await _permissionChecker.CheckPermissionAsync(tool, permissionMode, permissionCallback);
         if (!permissionGranted)
-            return new ToolExecuteResult($"Tool \"{name}\" requires permission level \"{tool.PermissionLevel}\" which was denied.", true);
+        {
+            var why = permissionMode == PermissionMode.Plan
+                ? $"Plan mode is read-only: \"{name}\" ({tool.PermissionLevel}) is not available. Describe the change you would make instead."
+                : permissionCallback == null
+                    ? $"Tool \"{name}\" needs approval ({tool.PermissionLevel}) and no one is available to approve it. Run with --auto to allow it."
+                    : $"The user denied \"{name}\". Do not retry the same call; ask or try a different approach.";
+            return new ToolExecuteResult(why, true);
+        }
 
         var sw = Stopwatch.StartNew();
         ToolExecuteResult result;
         try
         {
             result = await tool.ExecuteAsync(input, context, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

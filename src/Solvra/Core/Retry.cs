@@ -12,7 +12,16 @@ public record RetryOptions
 
 public static class Retry
 {
-    private static readonly HashSet<int> RetryableStatusCodes = [429, 500, 502, 503, 529];
+    private static readonly HashSet<int> RetryableStatusCodes = [408, 429, 500, 502, 503, 504, 529];
+
+    /// <summary>Longest server-requested wait we honour; beyond it the error is surfaced.</summary>
+    public const int MaxRetryAfterSeconds = 60;
+
+    /// <summary>Quota/plan limits look like 429s but won't clear within a retry window.</summary>
+    private static readonly string[] QuotaMessages =
+    [
+        "usage limit", "quota", "insufficient_quota", "billing", "credit balance", "limit reached", "resets in"
+    ];
 
     private static readonly string[] RetryableMessages =
     [
@@ -52,6 +61,11 @@ public static class Retry
                     throw;
 
                 var delay = ComputeDelay(attempt, options.BaseDelayMs, options.MaxDelayMs);
+                if (ex.Data["RetryAfterSeconds"] is int retryAfter)
+                {
+                    if (retryAfter > MaxRetryAfterSeconds) throw;
+                    delay = Math.Max(delay, retryAfter * 1000);
+                }
 
                 if (options.OnRetry != null)
                 {
@@ -69,7 +83,22 @@ public static class Retry
 
     public static bool IsRetryable(Exception ex)
     {
+        if (ex is OperationCanceledException) return false;
         var message = ex.Message.ToLowerInvariant();
+
+        foreach (var q in QuotaMessages)
+        {
+            if (message.Contains(q)) return false;
+        }
+
+        // Transport failures (connection reset/refused, DNS, TLS, truncated responses) carry no
+        // status code; they are worth retrying.
+        if (ex is HttpRequestException { StatusCode: null } &&
+            (ex.InnerException is IOException or System.Net.Sockets.SocketException or System.Security.Authentication.AuthenticationException
+             || message.Contains("error occurred while sending") || message.Contains("response ended prematurely")))
+            return true;
+        if (ex.InnerException is IOException or System.Net.Sockets.SocketException)
+            return true;
 
         // Check HTTP status codes
         if (ex is HttpRequestException httpEx && httpEx.StatusCode.HasValue)
@@ -83,10 +112,10 @@ public static class Retry
                 return false;
         }
 
-        // Check status codes mentioned in message
+        // Status codes in messages like "OpenAI API error 503: ..." (not any number in the text).
         foreach (var code in RetryableStatusCodes)
         {
-            if (message.Contains(code.ToString()))
+            if (message.Contains($"error {code}") || message.Contains($"status {code}") || message.Contains($"({code})"))
                 return true;
         }
 

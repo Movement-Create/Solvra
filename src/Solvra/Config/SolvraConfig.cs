@@ -6,10 +6,14 @@ namespace Solvra.Config;
 public record SolvraConfig
 {
     [JsonPropertyName("model")]
-    public string Model { get; init; } = "claude-3-5-sonnet-20241022";
+    public string Model { get; init; } = "claude-sonnet-5";
 
     [JsonPropertyName("provider")]
     public string Provider { get; init; } = "anthropic";
+
+    /// <summary>True when the provider came from a config file or SOLVRA_PROVIDER (not the built-in default).</summary>
+    [JsonIgnore]
+    public bool ProviderIsExplicit { get; init; }
 
     [JsonPropertyName("effort")]
     public string Effort { get; init; } = "medium";
@@ -18,7 +22,7 @@ public record SolvraConfig
     public int MaxTurns { get; init; } = 50;
 
     [JsonPropertyName("max_budget_usd")]
-    public decimal MaxBudgetUsd { get; init; } = 1.0m;
+    public decimal MaxBudgetUsd { get; init; } = 5.0m;
 
     [JsonPropertyName("permission_mode")]
     public string PermissionMode { get; init; } = "default";
@@ -36,10 +40,10 @@ public record SolvraConfig
     public string SkillsDir { get; init; } = "./skills";
 
     [JsonPropertyName("memory_dir")]
-    public string MemoryDir { get; init; } = "./memory";
+    public string MemoryDir { get; init; } = SolvraPaths.MemoryDir;
 
     [JsonPropertyName("sessions_dir")]
-    public string SessionsDir { get; init; } = "./sessions";
+    public string SessionsDir { get; init; } = SolvraPaths.SessionsDir;
 
     [JsonPropertyName("hooks")]
     public HooksConfig Hooks { get; init; } = new();
@@ -58,6 +62,17 @@ public record SolvraConfig
     /// </summary>
     [JsonPropertyName("webhook_secret")]
     public string? WebhookSecret { get; init; }
+
+    /// <summary>
+    /// Run the post-task "reflection" pass that asks the model to save lessons to memory.
+    /// Off by default: it re-runs the agent loop (extra cost, extra failure point).
+    /// </summary>
+    [JsonPropertyName("reflection")]
+    public bool Reflection { get; init; }
+
+    /// <summary>Max output tokens per model call.</summary>
+    [JsonPropertyName("max_tokens")]
+    public int MaxTokens { get; init; } = 8192;
 
     public EffortLevel ParsedEffort => EffortLevelExtensions.Parse(Effort);
 }

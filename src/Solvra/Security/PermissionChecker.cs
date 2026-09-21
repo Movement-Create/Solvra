@@ -4,41 +4,36 @@ using Solvra.Tools;
 
 namespace Solvra.Security;
 
+/// <summary>
+/// Permission policy per mode:
+/// - Auto / BypassPermissions: everything runs.
+/// - Plan: read-only. Read and Network tools run; Write, Execute and Agent tools are refused so the
+///   model has to describe its plan instead of carrying it out.
+/// - Default: Read and Network tools run; Write, Execute and Agent tools need the prompt callback
+///   to say yes. With no callback (nobody to ask) they are refused: fail closed, not open.
+/// </summary>
 public class PermissionChecker
 {
-    private static readonly Dictionary<PermissionMode, PermissionLevel> ModeThresholds = new()
-    {
-        [PermissionMode.Default] = PermissionLevel.Execute,
-        [PermissionMode.Auto] = PermissionLevel.Agent,
-        [PermissionMode.Plan] = PermissionLevel.Agent,
-        [PermissionMode.BypassPermissions] = PermissionLevel.Agent,
-    };
+    public static bool AllowedInPlanMode(ITool tool) =>
+        tool.PermissionLevel is PermissionLevel.Read or PermissionLevel.Network;
 
     public async Task<bool> CheckPermissionAsync(
         ITool tool,
         PermissionMode mode,
         Func<ITool, Task<bool>>? promptCallback = null)
     {
-        if (mode == PermissionMode.BypassPermissions) return true;
-        if (mode == PermissionMode.Plan) return true;
-
-        var threshold = ModeThresholds[mode];
-        var toolRank = (int)tool.PermissionLevel;
-        var thresholdRank = (int)threshold;
-
-        // Below threshold: auto-allow
-        if (toolRank < thresholdRank) return true;
-
-        // Auto mode: allow everything
-        if (mode == PermissionMode.Auto) return true;
-
-        // Default mode at/above threshold: ask
-        if (promptCallback != null)
+        switch (mode)
         {
-            return await promptCallback(tool);
+            case PermissionMode.BypassPermissions:
+            case PermissionMode.Auto:
+                return true;
+            case PermissionMode.Plan:
+                return AllowedInPlanMode(tool);
         }
 
-        // No callback in default mode → allow (fail-open)
-        return true;
+        if (tool.PermissionLevel is PermissionLevel.Read or PermissionLevel.Network)
+            return true;
+
+        return promptCallback != null && await promptCallback(tool);
     }
 }

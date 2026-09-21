@@ -41,7 +41,7 @@ public sealed class ChatGptProvider : IProvider
         var calls = new List<ToolCall>();
         var args = new Dictionary<string, StringBuilder>();
         TokenUsage usage = new();
-        var stop = "stop";
+        var stop = "end_turn";
         await foreach (var ev in StreamAsync(options, ct))
         {
             switch (ev)
@@ -253,7 +253,7 @@ internal sealed class ResponsesStreamParser
                 if (root.TryGetProperty("response", out var resp) && resp.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
                     usage = new TokenUsage { InputTokens = Int(u, "input_tokens"), OutputTokens = Int(u, "output_tokens") };
                 foreach (var callId in _itemToCall.Values.Where(id => !_ended.Contains(id)).ToList()) { _ended.Add(callId); events.Add(new StreamToolUseEnd(callId)); }
-                events.Add(new StreamMessageEnd(usage, _sawTool ? "tool_calls" : type == "response.incomplete" ? "max_tokens" : "stop"));
+                events.Add(new StreamMessageEnd(usage, type == "response.incomplete" ? "max_tokens" : _sawTool ? "tool_use" : "end_turn"));
                 _endEmitted = true;
                 Finished = true;
                 break;

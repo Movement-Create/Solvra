@@ -29,12 +29,18 @@ public class PermissionTests
         Assert.True(result);
     }
 
-    [Fact]
-    public async Task PlanModeAllowsEverything()
+    [Theory]
+    [InlineData(PermissionLevel.Read, true)]
+    [InlineData(PermissionLevel.Network, true)]
+    [InlineData(PermissionLevel.Write, false)]
+    [InlineData(PermissionLevel.Execute, false)]
+    [InlineData(PermissionLevel.Agent, false)]
+    public async Task PlanModeIsReadOnly(PermissionLevel level, bool expected)
     {
-        var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Execute };
-        var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Plan);
-        Assert.True(result);
+        var tool = new FakeTool { Name = "test", PermissionLevel = level };
+        // Even an approving callback must not unlock writes in plan mode.
+        var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Plan, _ => Task.FromResult(true));
+        Assert.Equal(expected, result);
     }
 
     [Fact]
@@ -54,11 +60,11 @@ public class PermissionTests
     }
 
     [Fact]
-    public async Task DefaultModeAllowsWrite()
+    public async Task DefaultModeAsksForWrite()
     {
         var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Write };
-        var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default);
-        Assert.True(result);
+        Assert.False(await _checker.CheckPermissionAsync(tool, PermissionMode.Default, _ => Task.FromResult(false)));
+        Assert.True(await _checker.CheckPermissionAsync(tool, PermissionMode.Default, _ => Task.FromResult(true)));
     }
 
     [Fact]
@@ -70,21 +76,22 @@ public class PermissionTests
     }
 
     [Fact]
-    public async Task DefaultModeAllowsExecuteWithoutCallback()
+    public async Task DefaultModeDeniesExecuteWithoutCallback()
     {
-        // SB10: Default mode is fail-open when no callback is provided
+        // Fail closed: with nobody to ask, Execute is refused.
         var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Execute };
         var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default);
-        Assert.True(result);
+        Assert.False(result);
     }
 
     [Fact]
-    public async Task DefaultModeAllowsAgentWithoutCallback()
+    public async Task DefaultModeDeniesWriteAndAgentWithoutCallback()
     {
-        // SB10: Default mode is fail-open when no callback is provided
-        var tool = new FakeTool { Name = "test", PermissionLevel = PermissionLevel.Agent };
-        var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default);
-        Assert.True(result);
+        foreach (var level in new[] { PermissionLevel.Write, PermissionLevel.Agent })
+        {
+            var tool = new FakeTool { Name = "test", PermissionLevel = level };
+            Assert.False(await _checker.CheckPermissionAsync(tool, PermissionMode.Default));
+        }
     }
 
     [Fact]

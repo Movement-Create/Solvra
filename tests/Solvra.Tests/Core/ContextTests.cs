@@ -66,7 +66,43 @@ public class ContextTests
         Assert.Contains("Lesson 1", result);
         Assert.Contains("# Memory", result);
         Assert.Contains("User prefers Rust", result);
+        // A custom base prompt replaces the default instructions.
+        Assert.DoesNotContain("# Agent Instructions", result);
+    }
+
+    [Fact]
+    public void AssembleContext_UsesCodingInstructionsByDefault()
+    {
+        var result = Context.AssembleContext(null, null, null, null, null, environment: "# Environment\n- Working directory: /x");
         Assert.Contains("# Agent Instructions", result);
+        Assert.Contains("coding agent", result);
+        Assert.Contains("Working directory: /x", result);
+    }
+
+    [Fact]
+    public async Task LoadProjectInstructions_WalksUpToGitRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"solvra-ctx-{Guid.NewGuid():N}");
+        var sub = Path.Combine(root, "src", "app");
+        Directory.CreateDirectory(sub);
+        Directory.CreateDirectory(Path.Combine(root, ".git"));
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "AGENTS.md"), "root agents rule");
+            await File.WriteAllTextAsync(Path.Combine(root, "CLAUDE.md"), "root claude rule");
+            await File.WriteAllTextAsync(Path.Combine(sub, "SOLVRA.md"), "sub rule");
+
+            var text = await Context.LoadProjectInstructionsAsync(sub);
+            Assert.NotNull(text);
+            Assert.Contains("root agents rule", text);
+            Assert.Contains("root claude rule", text);
+            Assert.Contains("sub rule", text);
+            Assert.True(text!.IndexOf("root agents rule", StringComparison.Ordinal) < text.IndexOf("sub rule", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 
     [Fact]
@@ -139,12 +175,10 @@ public class ContextTests
     [Fact]
     public void CompressContext_Truncate_KeepsFirstAndLast()
     {
-        // Create 50 messages so truncation preserves first 2 + system message + last 30
+        // 50 exchanges of ~6k tokens each against a 128k window → must drop old exchanges.
         var messages = new List<Message>();
         for (int i = 0; i < 50; i++)
         {
-            // Make each message ~25k chars = ~6250 tokens
-            // 50 * 6250 = 312,500 tokens. For 128k context = ~244% → hard truncate
             messages.Add(Message.FromText(
                 i % 2 == 0 ? MessageRole.User : MessageRole.Assistant,
                 new string((char)('a' + (i % 26)), 25_000)));
@@ -152,17 +186,43 @@ public class ContextTests
 
         var result = Context.CompressContext(messages, "llama3.1");
 
-        // Should have first 2 + compaction notice + last 30 = 33
-        Assert.Equal(33, result.Count);
-
-        // First two should be unchanged
+        Assert.True(result.Count < messages.Count);
         Assert.Equal(messages[0].GetTextContent(), result[0].GetTextContent());
-        Assert.Equal(messages[1].GetTextContent(), result[1].GetTextContent());
-
-        // Third should be the compaction notice
-        Assert.Contains("Context compacted", result[2].GetTextContent());
-
-        // Last should be the original last message
+        Assert.Contains("Context compacted", result[1].GetTextContent());
         Assert.Equal(messages[49].GetTextContent(), result[^1].GetTextContent());
+        Assert.True(Context.EstimateContextTokens(result) < Context.GetContextLimit("llama3.1") * 0.6);
+        // Roles still alternate after the notice (user, assistant(notice), user, ...).
+        Assert.Equal(MessageRole.User, result[2].Role);
+    }
+
+    [Fact]
+    public void CompressContext_NeverSplitsToolCallFromResult()
+    {
+        var messages = new List<Message> { Message.FromText(MessageRole.User, "task") };
+        for (int i = 0; i < 40; i++)
+        {
+            messages.Add(new Message { Role = MessageRole.Assistant, Content = [new ToolUseContent { Id = $"c{i}", Name = "bash", Input = new() }] });
+            // Large enough that even after shortening old results the history must be truncated.
+            messages.Add(new Message { Role = MessageRole.Tool, Content = [new ToolResultContent { ToolUseId = $"c{i}", Content = new string('x', 30_000) }] });
+            messages.Add(Message.FromText(MessageRole.Assistant, new string('y', 12_000)));
+            messages.Add(Message.FromText(MessageRole.User, "continue"));
+            if (i % 5 == 4)
+            {
+                messages.Add(Message.FromText(MessageRole.Assistant, "progress"));
+                messages.Add(Message.FromText(MessageRole.User, $"next step {i}"));
+            }
+        }
+
+        var result = Context.CompressContext(messages, "llama3.1");
+
+        var toolUseIds = result.SelectMany(m => m.Content.OfType<ToolUseContent>()).Select(t => t.Id).ToHashSet();
+        var resultIds = result.SelectMany(m => m.Content.OfType<ToolResultContent>()).Select(t => t.ToolUseId).ToHashSet();
+        Assert.Equal(toolUseIds, resultIds);
+        Assert.True(result.Count < messages.Count, "expected truncation");
+        Assert.Contains("Context compacted", result[1].GetTextContent());
+        Assert.Equal(MessageRole.User, result[2].Role);
+        for (var i = 1; i < result.Count; i++)
+            if (result[i].Role == MessageRole.Tool)
+                Assert.Contains(result[i - 1].Content, c => c is ToolUseContent);
     }
 }

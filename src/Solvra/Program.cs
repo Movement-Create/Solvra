@@ -1,11 +1,11 @@
 using System.CommandLine;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using Solvra.CLI;
 using Solvra.Config;
 using Solvra.Core;
-using Solvra.Hooks;
 using Solvra.Memory;
 using Solvra.Models;
-using Solvra.Observability;
 using Solvra.Providers;
 using Solvra.Scheduler;
 using Solvra.Security;
@@ -16,161 +16,183 @@ namespace Solvra;
 
 public static class Program
 {
+    private static readonly JsonSerializerOptions JsonOut = new()
+    {
+        WriteIndented = true,
+        // Keep quotes, backticks and non-ASCII readable in --json output.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     public static async Task<int> Main(string[] args)
+    {
+        try
+        {
+            return await BuildRoot().InvokeAsync(args);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ReportFatal(ex);
+            return 1;
+        }
+    }
+
+    /// <summary>One readable line instead of a .NET stack trace (set SOLVRA_DEBUG=1 for the trace).</summary>
+    private static void ReportFatal(Exception ex)
+    {
+        Console.Error.WriteLine($"solvra: {ex.Message}");
+        if (Environment.GetEnvironmentVariable("SOLVRA_DEBUG") is "1" or "true")
+            Console.Error.WriteLine(ex);
+    }
+
+    private static RootCommand BuildRoot()
     {
         var rootCommand = new RootCommand("Solvra — AI agent orchestrator");
 
-        // --- solvra run <prompt> ---
-        var runPromptArg = new Argument<string>("prompt", "The prompt to execute");
-        var providerOption = new Option<string?>("--provider", "LLM provider");
+        // --- shared options ---
+        var providerOption = new Option<string?>("--provider", "LLM provider (wins over guessing from the model name)");
         providerOption.AddAlias("-p");
-        var modelOption = new Option<string?>("--model", "Model to use");
+        var modelOption = new Option<string?>("--model", "Model to use (provider:model pins the provider)");
         modelOption.AddAlias("-m");
-        var maxTurnsOption = new Option<int?>("--max-turns", "Max turns");
+        var maxTurnsOption = new Option<int?>("--max-turns", "Max turns (default from config, 50)");
         var jsonOption = new Option<bool>("--json", "Output as JSON");
         var autoOption = new Option<bool>("--auto", "Auto-approve all tool permissions");
-        var planOption = new Option<bool>("--plan", "Plan mode");
+        var planOption = new Option<bool>("--plan", "Plan mode: read-only tools only");
         var effortOption = new Option<string?>("--effort", "Effort level (low/medium/high/max)");
-        var systemOption = new Option<string?>("--system", "System prompt override");
-        var sessionOption = new Option<string?>("--session", "Session ID to resume or name");
+        var systemOption = new Option<string?>("--system", "System prompt (replaces the default instructions)");
+        var sessionOption = new Option<string?>("--session", "Continue an existing session id (created if it does not exist)");
         var summaryOption = new Option<bool>("--summary", "Print end-of-session summary");
+        var maxBudgetOption = new Option<decimal?>("--max-budget", "Max estimated USD per run (0 = no limit)");
+        var cwdOption = new Option<string?>("--cwd", "Working directory for tools and project instructions");
+        var reflectOption = new Option<bool?>("--reflect", "Run the post-task lesson-saving pass (default: config 'reflection')");
+        var noSessionOption = new Option<bool>("--no-session", "Do not write a session file");
 
+        // --- solvra run <prompt> ---
+        var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
-        runCommand.AddOption(providerOption);
-        runCommand.AddOption(modelOption);
-        runCommand.AddOption(maxTurnsOption);
-        runCommand.AddOption(jsonOption);
-        runCommand.AddOption(autoOption);
-        runCommand.AddOption(planOption);
-        runCommand.AddOption(effortOption);
-        runCommand.AddOption(systemOption);
-        runCommand.AddOption(sessionOption);
-        runCommand.AddOption(summaryOption);
+        foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
+                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption })
+            runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
         {
-            var prompt = context.ParseResult.GetValueForArgument(runPromptArg);
-            var provider = context.ParseResult.GetValueForOption(providerOption);
-            var model = context.ParseResult.GetValueForOption(modelOption);
-            var maxTurns = context.ParseResult.GetValueForOption(maxTurnsOption);
-            var outputJson = context.ParseResult.GetValueForOption(jsonOption);
-            var auto = context.ParseResult.GetValueForOption(autoOption);
-            var plan = context.ParseResult.GetValueForOption(planOption);
-            var effort = context.ParseResult.GetValueForOption(effortOption);
-            var system = context.ParseResult.GetValueForOption(systemOption);
-            var showSummary = context.ParseResult.GetValueForOption(summaryOption);
+            var p = context.ParseResult;
+            var prompt = p.GetValueForArgument(runPromptArg);
+            var outputJson = p.GetValueForOption(jsonOption);
+            var auto = p.GetValueForOption(autoOption);
+            var plan = p.GetValueForOption(planOption);
+            var ct = context.GetCancellationToken();
+
+            if (prompt == "-") prompt = await Console.In.ReadToEndAsync(ct);
+            if (!ApplyCwd(p.GetValueForOption(cwdOption))) { context.ExitCode = 1; return; }
 
             var config = await ConfigLoader.LoadAsync();
+            if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
+            var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
+            var (provider, model) = AgentHost.ResolveTarget(config, p.GetValueForOption(providerOption), p.GetValueForOption(modelOption), effort);
 
-            // When provider is explicitly set but model is not, pick the default model for that provider
-            // to avoid model/provider mismatch (e.g. claude model with google provider)
-            var resolvedProvider = provider ?? config.Provider;
-            var resolvedModel = model ?? config.Model;
-            if (provider != null && model == null && ModelRouter.DetectProvider(resolvedModel) is string detectedProvider && detectedProvider != resolvedProvider)
-            {
-                var resolvedEffort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort;
-                resolvedModel = ModelRouter.GetEffortModel(resolvedProvider, resolvedEffort);
-            }
-
+            var s = AgentHost.Build(config);
+            var sessionMgr = new SessionManager(config.SessionsDir);
             var sessionConfig = new SessionConfig
             {
                 Id = Guid.NewGuid().ToString(),
                 CreatedAt = DateTime.UtcNow.ToString("o"),
-                Model = resolvedModel,
-                Provider = resolvedProvider,
+                Title = prompt.Length > 80 ? prompt[..80] : prompt,
+                Model = model,
+                Provider = provider,
                 PermissionMode = plan ? "plan" : (auto ? "auto" : config.PermissionMode),
-                Effort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort,
-                MaxTurns = maxTurns ?? 20,
-                MaxBudgetUsd = config.MaxBudgetUsd,
-                SystemPrompt = system ?? config.SystemPrompt,
+                Effort = effort,
+                MaxTurns = p.GetValueForOption(maxTurnsOption) ?? config.MaxTurns,
+                MaxBudgetUsd = p.GetValueForOption(maxBudgetOption) ?? config.MaxBudgetUsd,
+                MaxTokens = config.MaxTokens,
+                SystemPrompt = p.GetValueForOption(systemOption) ?? config.SystemPrompt,
                 AllowedTools = config.AllowedTools,
                 DisallowedTools = config.DisallowedTools
             };
 
-            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
-                BuildSubsystems(config);
-
-            // Set up AgentTool delegate
-            AgentTool.RunAgentDelegate = async (agentPrompt, agentModel, agentSystem, agentMaxTurns, agentCt) =>
+            var history = new List<Message>();
+            var sessionId = p.GetValueForOption(sessionOption);
+            if (!string.IsNullOrEmpty(sessionId))
             {
-                var subLoop = new AgentLoop(router, registry, hookEngine, auditLogger, tracer: tracer);
-                var subSession = sessionConfig with
+                if (!SessionManager.IsValidSessionId(sessionId))
                 {
-                    Id = Guid.NewGuid().ToString(),
-                    Model = agentModel ?? sessionConfig.Model,
-                    MaxTurns = agentMaxTurns
-                };
-                var subResult = await subLoop.RunAsync(new AgentRunOptions
+                    Console.Error.WriteLine($"solvra: invalid session id '{sessionId}' (letters, digits, '.', '_' and '-' only)");
+                    context.ExitCode = 1;
+                    return;
+                }
+                try
                 {
-                    Prompt = agentPrompt,
-                    Session = subSession,
-                    SystemPrompt = agentSystem,
-                    Streaming = false
-                }, agentCt);
-                return subResult.Text ?? "";
-            };
-
-            // SB10: Headless permission warning
-            if (!auto && Console.IsInputRedirected)
+                    var info = await sessionMgr.ResumeAsync(sessionId);
+                    history.AddRange(info.Messages);
+                    // Keep the stored session's identity and file; CLI flags for this run still apply.
+                    sessionConfig = sessionConfig with { Id = info.Config.Id, CreatedAt = info.Config.CreatedAt, FilePath = info.Config.FilePath, Title = info.Config.Title };
+                }
+                catch (FileNotFoundException)
+                {
+                    sessionConfig = await sessionMgr.CreateAsync(sessionConfig with { Id = sessionId });
+                }
+            }
+            else if (!p.GetValueForOption(noSessionOption))
             {
-                Console.Error.WriteLine("[Warning] Headless mode with default permissions. Execute/Agent tools will be denied. Use --auto for headless operation.");
+                sessionConfig = await sessionMgr.CreateAsync(sessionConfig);
             }
 
-            var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
-            var reflection = new Reflection(agentLoop);
+            var canPrompt = !Console.IsInputRedirected && prompt != "-";
+            if (!auto && !plan && !canPrompt && config.PermissionMode is not ("auto" or "bypasspermissions"))
+                Console.Error.WriteLine("[warning] No terminal to ask for approval: write/exec/agent tools will be refused. Use --auto to allow them.");
 
-            var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
+            var result = await s.CreateReflection().RunAgentWithReflectionAsync(new AgentRunOptions
             {
                 Prompt = prompt,
                 Session = sessionConfig,
-                SystemPrompt = system,
+                History = history,
+                SystemPrompt = null,
                 Streaming = !outputJson,
                 OnText = outputJson ? null : text => Console.Write(text),
-                OnPermissionRequest = auto ? null : async tc =>
-                {
-                    Console.Write($"\nAllow tool '{tc.Name}'? (y/n): ");
-                    var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
-                    return answer is "y" or "yes";
-                }
-            }, context.GetCancellationToken());
+                OnPermissionRequest = auto || !canPrompt ? null : AgentHost.AskOnConsole,
+            }, ct);
+
+            await sessionMgr.LogResultAsync(sessionConfig, result);
 
             if (outputJson)
             {
-                var json = JsonSerializer.Serialize(new
+                Console.WriteLine(JsonSerializer.Serialize(new
                 {
                     text = result.Text,
                     turns = result.Turns,
                     cost_usd = result.CostUsd,
                     stop_reason = result.StopReason.ToString().ToLowerInvariant(),
+                    error = result.Error,
+                    session_id = string.IsNullOrEmpty(sessionConfig.FilePath) ? null : sessionConfig.Id,
+                    model = sessionConfig.Model,
+                    provider = sessionConfig.Provider,
                     usage = new { input = result.Usage.InputTokens, output = result.Usage.OutputTokens }
-                }, new JsonSerializerOptions { WriteIndented = true });
-                Console.WriteLine(json);
+                }, JsonOut));
             }
             else
             {
                 Console.WriteLine();
             }
 
-            if (showSummary)
+            if (p.GetValueForOption(summaryOption))
             {
                 Console.WriteLine($"\n--- Summary ---");
+                Console.WriteLine($"Model: {sessionConfig.Model} ({sessionConfig.Provider})");
                 Console.WriteLine($"Turns: {result.Turns}");
                 Console.WriteLine($"Tokens: {result.Usage.InputTokens} in / {result.Usage.OutputTokens} out");
-                Console.WriteLine($"Cost: ${result.CostUsd:F4}");
+                Console.WriteLine($"Cost: ${result.CostUsd:F4}{(result.CostUsd == 0 ? (sessionConfig.Provider == "chatgpt" ? " (covered by the ChatGPT subscription)" : " (no per-token price known for this model)") : "")}");
                 Console.WriteLine($"Stop reason: {result.StopReason}");
+                if (!string.IsNullOrEmpty(sessionConfig.FilePath)) Console.WriteLine($"Session: {sessionConfig.Id}");
             }
+
+            context.ExitCode = AgentHost.ExitCode(result.StopReason);
         });
 
         // --- solvra chat ---
         var chatCommand = new Command("chat", "Interactive chat REPL");
-        chatCommand.AddOption(providerOption);
-        chatCommand.AddOption(modelOption);
-        chatCommand.AddOption(effortOption);
-        chatCommand.AddOption(maxTurnsOption);
-        chatCommand.AddOption(autoOption);
-        chatCommand.AddOption(planOption);
-        var maxBudgetOption = new Option<decimal?>("--max-budget", "Max USD budget per session");
-        chatCommand.AddOption(maxBudgetOption);
+        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, systemOption, cwdOption, reflectOption })
+            chatCommand.AddOption(o);
+        var chatBudgetOption = new Option<decimal?>("--max-budget", "Max estimated USD per turn (0 = no limit)");
+        chatCommand.AddOption(chatBudgetOption);
         var resumeOption = new Option<string?>("--resume", "Resume existing session");
         chatCommand.AddOption(resumeOption);
         var ndjsonOption = new Option<bool>("--ndjson", "Machine-readable NDJSON protocol on stdin/stdout");
@@ -178,147 +200,77 @@ public static class Program
 
         chatCommand.SetHandler(async (context) =>
         {
-            var provider = context.ParseResult.GetValueForOption(providerOption);
-            var model = context.ParseResult.GetValueForOption(modelOption);
-            var maxTurns = context.ParseResult.GetValueForOption(maxTurnsOption);
-            var auto = context.ParseResult.GetValueForOption(autoOption);
-            var effort = context.ParseResult.GetValueForOption(effortOption);
-            var maxBudget = context.ParseResult.GetValueForOption(maxBudgetOption);
-            var resume = context.ParseResult.GetValueForOption(resumeOption);
-            var ndjson = context.ParseResult.GetValueForOption(ndjsonOption);
+            var p = context.ParseResult;
+            var provider = p.GetValueForOption(providerOption);
+            var model = p.GetValueForOption(modelOption);
+            var auto = p.GetValueForOption(autoOption);
+            var plan = p.GetValueForOption(planOption);
+            var resume = p.GetValueForOption(resumeOption);
+            var ndjson = p.GetValueForOption(ndjsonOption);
             var ct = context.GetCancellationToken();
 
+            if (!ApplyCwd(p.GetValueForOption(cwdOption))) { context.ExitCode = 1; return; }
+
             var config = await ConfigLoader.LoadAsync();
-
-            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
-                BuildSubsystems(config);
-
+            if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
+            var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
+            var s = AgentHost.Build(config);
             var sessionMgr = new SessionManager(config.SessionsDir);
-
-            // Set up AgentTool delegate
-            AgentTool.RunAgentDelegate = async (agentPrompt, agentModel, agentSystem, agentMaxTurns, agentCt) =>
-            {
-                var subLoop = new AgentLoop(router, registry, hookEngine, auditLogger, tracer: tracer);
-                var subResult = await subLoop.RunAsync(new AgentRunOptions
-                {
-                    Prompt = agentPrompt,
-                    Session = new SessionConfig
-                    {
-                        Id = Guid.NewGuid().ToString(),
-                        CreatedAt = DateTime.UtcNow.ToString("o"),
-                        Model = agentModel ?? config.Model,
-                        MaxTurns = agentMaxTurns
-                    },
-                    SystemPrompt = agentSystem,
-                    Streaming = false
-                }, agentCt);
-                return subResult.Text ?? "";
-            };
-
-            var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
-            var reflection = new Reflection(agentLoop);
 
             var history = new List<Message>();
             SessionConfig sessionConfig;
+            var mode = plan ? "plan" : (auto ? "auto" : config.PermissionMode);
 
             if (!string.IsNullOrEmpty(resume))
             {
-                var info = await sessionMgr.ResumeAsync(resume);
-                sessionConfig = info.Config;
+                Solvra.Core.SessionInfo info;
+                try { info = await sessionMgr.ResumeAsync(resume); }
+                catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+                {
+                    Console.Error.WriteLine($"solvra: {ex.Message}");
+                    context.ExitCode = 1;
+                    return;
+                }
+                sessionConfig = info.Config with { PermissionMode = mode, AllowedTools = config.AllowedTools, DisallowedTools = config.DisallowedTools };
                 history.AddRange(info.Messages);
-                if (!ndjson) Console.WriteLine($"Resumed session {resume}");
-                else if (!string.IsNullOrEmpty(model))
+                if (!string.IsNullOrEmpty(model))
                 {
                     // UI clients restart the process to resume; honour the model they have selected.
-                    var colon = model.IndexOf(':');
                     sessionConfig = sessionConfig with
                     {
                         Model = model,
-                        Provider = colon > 0 ? model[..colon] : provider ?? ModelRouter.DetectProvider(model) ?? sessionConfig.Provider,
+                        Provider = ModelRouter.ChooseProvider(model, provider, sessionConfig.Provider, configuredIsExplicit: true),
                     };
                 }
+                if (!ndjson) Console.WriteLine($"Resumed session {resume} ({history.Count} messages)");
             }
             else
             {
-                // When provider is explicitly set but model is not, pick the default model for that provider
-                var chatProvider = provider ?? config.Provider;
-                var chatModel = model ?? config.Model;
-                if (provider != null && model == null && ModelRouter.DetectProvider(chatModel) is string detectedChatProvider && detectedChatProvider != chatProvider)
-                {
-                    var chatEffort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort;
-                    chatModel = ModelRouter.GetEffortModel(chatProvider, chatEffort);
-                }
-
+                var (chatProvider, chatModel) = AgentHost.ResolveTarget(config, provider, model, effort);
                 sessionConfig = await sessionMgr.CreateAsync(new SessionConfig
                 {
                     Id = Guid.NewGuid().ToString(),
                     CreatedAt = DateTime.UtcNow.ToString("o"),
                     Model = chatModel,
                     Provider = chatProvider,
-                    PermissionMode = auto ? "auto" : config.PermissionMode,
-                    Effort = effort != null ? EffortLevelExtensions.Parse(effort) : config.ParsedEffort,
-                    MaxTurns = maxTurns ?? config.MaxTurns,
-                    MaxBudgetUsd = maxBudget ?? 5.0m,
+                    PermissionMode = mode,
+                    Effort = effort,
+                    MaxTurns = p.GetValueForOption(maxTurnsOption) ?? config.MaxTurns,
+                    MaxBudgetUsd = p.GetValueForOption(chatBudgetOption) ?? config.MaxBudgetUsd,
+                    MaxTokens = config.MaxTokens,
+                    SystemPrompt = p.GetValueForOption(systemOption) ?? config.SystemPrompt,
+                    AllowedTools = config.AllowedTools,
+                    DisallowedTools = config.DisallowedTools,
                 });
             }
 
             if (ndjson)
             {
-                await NdjsonChat.RunAsync(reflection, sessionMgr, sessionConfig, history, auto, !string.IsNullOrEmpty(resume), ct);
+                await NdjsonChat.RunAsync(s.CreateReflection(), sessionMgr, sessionConfig, history, auto, !string.IsNullOrEmpty(resume), ct);
                 return;
             }
 
-            Console.WriteLine($"Solvra Chat ({sessionConfig.Model}) — type /exit to quit");
-
-            while (!ct.IsCancellationRequested)
-            {
-                Console.Write("\nyou> ");
-                var input = Console.ReadLine();
-                if (input == null) break;
-                input = input.Trim();
-
-                switch (input.ToLowerInvariant())
-                {
-                    case "/exit" or "/quit" or "/q":
-                        Console.WriteLine("Goodbye!");
-                        return;
-                    case "/help":
-                        Console.WriteLine("Commands: /exit, /quit, /q, /help, /session, /tools");
-                        continue;
-                    case "/session":
-                        Console.WriteLine($"Session: {sessionConfig.Id}");
-                        Console.WriteLine($"Model: {sessionConfig.Model}");
-                        Console.WriteLine($"Turns: {history.Count(m => m.Role == MessageRole.User)}");
-                        continue;
-                    case "/tools":
-                        foreach (var tool in registry.GetToolDefinitions())
-                            Console.WriteLine($"  {tool.Name}: {tool.Description}");
-                        continue;
-                    case "":
-                        continue;
-                }
-
-                var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
-                {
-                    Prompt = input,
-                    Session = sessionConfig,
-                    History = history,
-                    Streaming = true,
-                    OnText = text => Console.Write(text),
-                    OnPermissionRequest = auto ? null : async tc =>
-                    {
-                        Console.Write($"\nAllow tool '{tc.Name}'? (y/n): ");
-                        var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
-                        return answer is "y" or "yes";
-                    }
-                }, ct);
-
-                history = [..result.Messages];
-                Console.WriteLine();
-
-                await sessionMgr.LogUserMessageAsync(sessionConfig, input);
-                await sessionMgr.LogAssistantMessageAsync(sessionConfig, result.Text);
-            }
+            await new ChatRepl(s, sessionConfig, history, auto).RunAsync(ct);
         });
 
         // --- solvra models ---
@@ -332,10 +284,10 @@ public static class Program
             var asJson = context.ParseResult.GetValueForOption(modelsJsonOption);
             var providerFilter = context.ParseResult.GetValueForOption(modelsProviderOption);
             var router = new ModelRouter();
+            var config = await ConfigLoader.LoadAsync();
 
             if (asJson)
             {
-                var config = await ConfigLoader.LoadAsync();
                 var providerId = providerFilter ?? config.Provider;
                 var prov = router.GetProvider(providerId);
                 var models = await prov.ListModelsAsync(context.GetCancellationToken());
@@ -345,13 +297,14 @@ public static class Program
                 return;
             }
 
-            foreach (var providerId in router.GetRegisteredProviderIds())
+            var ids = providerFilter != null ? [providerFilter] : router.GetRegisteredProviderIds();
+            foreach (var providerId in ids)
             {
                 try
                 {
                     var prov = router.GetProvider(providerId);
                     var models = await prov.ListModelsAsync(context.GetCancellationToken());
-                    Console.WriteLine($"\n{prov.DisplayName}:");
+                    Console.WriteLine($"\n{prov.DisplayName} ({providerId}):");
                     foreach (var m in models)
                         Console.WriteLine($"  {m}");
                 }
@@ -360,44 +313,53 @@ public static class Program
                     Console.WriteLine($"\n{providerId}: Error — {ex.Message}");
                 }
             }
+            Console.WriteLine($"\nDefault: {config.Model} ({config.Provider}). Use -m provider:model to pick a provider explicitly.");
         });
 
         // --- solvra serve ---
         var serveCommand = new Command("serve", "Start webhook server");
         var portOption = new Option<int>("--port", () => 7331, "Webhook port");
+        var hostOption = new Option<string>("--host", () => "127.0.0.1", "Address to bind (use + or 0.0.0.0 for all interfaces)");
         var noCronOption = new Option<bool>("--no-cron", "Disable cron scheduler");
         var noWebhookOption = new Option<bool>("--no-webhook", "Disable webhook server");
+        var insecureOption = new Option<bool>("--insecure-no-auth", "Allow the webhook to run without SOLVRA_WEBHOOK_SECRET (anyone who can reach it can run commands)");
         serveCommand.AddOption(portOption);
+        serveCommand.AddOption(hostOption);
         serveCommand.AddOption(noCronOption);
         serveCommand.AddOption(noWebhookOption);
+        serveCommand.AddOption(insecureOption);
 
         serveCommand.SetHandler(async (context) =>
         {
-            var port = context.ParseResult.GetValueForOption(portOption);
-            var noCron = context.ParseResult.GetValueForOption(noCronOption);
-            var noWebhook = context.ParseResult.GetValueForOption(noWebhookOption);
+            var p = context.ParseResult;
+            var port = p.GetValueForOption(portOption);
+            var host = p.GetValueForOption(hostOption)!;
+            var noCron = p.GetValueForOption(noCronOption);
+            var noWebhook = p.GetValueForOption(noWebhookOption);
             var ct = context.GetCancellationToken();
 
             var config = await ConfigLoader.LoadAsync();
-            var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
-                BuildSubsystems(config);
+            var s = AgentHost.Build(config);
 
-            // Build an agent-runner delegate for webhook/cron to invoke
-            Func<string, string, CancellationToken, Task<(string Text, int Turns)>> runAgent = async (prompt, title, innerCt) =>
+            Func<string, string, string?, CancellationToken, Task<(string Text, int Turns)>> runAgent = async (prompt, title, modelOverride, innerCt) =>
             {
-                var loop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
-                var session = new SessionConfig
+                var model = modelOverride ?? config.Model;
+                var session = await new SessionManager(config.SessionsDir).CreateAsync(new SessionConfig
                 {
                     Id = Guid.NewGuid().ToString(),
                     CreatedAt = DateTime.UtcNow.ToString("o"),
-                    Model = config.Model,
-                    Provider = config.Provider,
+                    Model = model,
+                    Provider = ModelRouter.ChooseProvider(model, null, config.Provider, config.ProviderIsExplicit),
                     PermissionMode = "auto",
                     MaxTurns = config.MaxTurns,
                     MaxBudgetUsd = config.MaxBudgetUsd,
+                    MaxTokens = config.MaxTokens,
+                    SystemPrompt = config.SystemPrompt,
+                    AllowedTools = config.AllowedTools,
+                    DisallowedTools = config.DisallowedTools,
                     Title = title
-                };
-                var result = await loop.RunAsync(new AgentRunOptions
+                });
+                var result = await s.CreateReflection().RunAgentWithReflectionAsync(new AgentRunOptions
                 {
                     Prompt = prompt,
                     Session = session,
@@ -410,10 +372,18 @@ public static class Program
 
             if (!noWebhook)
             {
-                var webhookServer = new WebhookServer(port, config.WebhookSecret);
-                webhookServer.RunAgentDelegate = runAgent;
+                var secret = config.WebhookSecret ?? Environment.GetEnvironmentVariable("SOLVRA_WEBHOOK_SECRET");
+                if (string.IsNullOrEmpty(secret) && !p.GetValueForOption(insecureOption))
+                {
+                    Console.Error.WriteLine("solvra: refusing to start the webhook without SOLVRA_WEBHOOK_SECRET (or webhook_secret in config): " +
+                        "it runs agents with full tool access. Set a secret, use --no-webhook, or pass --insecure-no-auth.");
+                    context.ExitCode = 1;
+                    return;
+                }
+                var webhookServer = new WebhookServer(port, secret ?? "", host);
+                webhookServer.RunAgentDelegate = (prompt, title, innerCt) => runAgent(prompt, title, null, innerCt);
                 webhookServer.Start();
-                Console.WriteLine($"  Webhook: POST http://localhost:{port}/trigger");
+                Console.WriteLine($"  Webhook: POST http://{(host is "+" or "*" or "0.0.0.0" ? "localhost" : host)}:{port}/trigger");
             }
 
             var cronScheduler = new CronScheduler();
@@ -421,23 +391,27 @@ public static class Program
             {
                 cronScheduler.RunAgentDelegate = async (prompt, title, innerCt) =>
                 {
-                    var (text, _) = await runAgent(prompt, title, innerCt);
+                    var (text, _) = await runAgent(prompt, title, null, innerCt);
                     return text;
                 };
 
-                foreach (var job in config.Cron)
+                foreach (var job in config.Cron.Where(j => j.Enabled))
                     cronScheduler.AddJob(job);
 
-                Console.WriteLine($"  Cron jobs: {config.Cron.Count} configured");
+                Console.WriteLine($"  Cron jobs: {config.Cron.Count(j => j.Enabled)} configured");
                 tasks.Add(cronScheduler.StartAsync(ct));
             }
 
-            Console.WriteLine($"Solvra server listening on port {port}");
+            Console.WriteLine($"Solvra server running (model {config.Model}, provider {config.Provider})");
 
-            if (tasks.Count > 0)
-                await Task.WhenAll(tasks);
-            else
-                await Task.Delay(Timeout.Infinite, ct);
+            try
+            {
+                if (tasks.Count > 0)
+                    await Task.WhenAll(tasks);
+                else
+                    await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException) { /* shutdown */ }
         });
 
         // --- solvra memory prune ---
@@ -543,95 +517,49 @@ public static class Program
             }
         }, sessionShowArg);
 
+
         // --- solvra session resume <id> ---
         var sessionResumeArg = new Argument<string>("id", "Session ID to resume");
         var sessionResumeCmd = new Command("resume", "Resume a previous session") { sessionResumeArg };
         sessionResumeCmd.AddOption(autoOption);
+        sessionResumeCmd.AddOption(planOption);
         sessionResumeCmd.SetHandler(async (context) =>
         {
             var id = context.ParseResult.GetValueForArgument(sessionResumeArg);
             var auto = context.ParseResult.GetValueForOption(autoOption);
+            var plan = context.ParseResult.GetValueForOption(planOption);
             var ct = context.GetCancellationToken();
 
             var config = await ConfigLoader.LoadAsync();
             var sm = new SessionManager(config.SessionsDir);
-            try
+            Solvra.Core.SessionInfo info;
+            try { info = await sm.ResumeAsync(id); }
+            catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
             {
-                var info = await sm.ResumeAsync(id);
-                Console.WriteLine($"Resumed session {id} with {info.Messages.Count} messages.");
-
-                // SB7: Drop into interactive chat REPL with the resumed session
-                var (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer) =
-                    BuildSubsystems(config);
-
-                var agentLoop = new AgentLoop(router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer: tracer);
-                var reflection = new Reflection(agentLoop);
-                var sessionConfig = info.Config;
-                var history = new List<Message>(info.Messages);
-
-                Console.WriteLine($"Solvra Chat ({sessionConfig.Model}) — type /exit to quit");
-
-                while (!ct.IsCancellationRequested)
-                {
-                    Console.Write("\nyou> ");
-                    var input = Console.ReadLine();
-                    if (input == null) break;
-                    input = input.Trim();
-
-                    switch (input.ToLowerInvariant())
-                    {
-                        case "/exit" or "/quit" or "/q":
-                            Console.WriteLine("Goodbye!");
-                            return;
-                        case "/help":
-                            Console.WriteLine("Commands: /exit, /quit, /q, /help, /session, /tools");
-                            continue;
-                        case "/session":
-                            Console.WriteLine($"Session: {sessionConfig.Id}");
-                            Console.WriteLine($"Model: {sessionConfig.Model}");
-                            Console.WriteLine($"Turns: {history.Count(m => m.Role == MessageRole.User)}");
-                            continue;
-                        case "/tools":
-                            foreach (var tool in registry.GetToolDefinitions())
-                                Console.WriteLine($"  {tool.Name}: {tool.Description}");
-                            continue;
-                        case "":
-                            continue;
-                    }
-
-                    var result = await reflection.RunAgentWithReflectionAsync(new AgentRunOptions
-                    {
-                        Prompt = input,
-                        Session = sessionConfig,
-                        History = history,
-                        Streaming = true,
-                        OnText = text => Console.Write(text),
-                        OnPermissionRequest = auto ? null : async tc =>
-                        {
-                            Console.Write($"\nAllow tool '{tc.Name}'? (y/n): ");
-                            var answer = Console.ReadLine()?.Trim().ToLowerInvariant();
-                            return answer is "y" or "yes";
-                        }
-                    }, ct);
-
-                    history = [..result.Messages];
-                    Console.WriteLine();
-
-                    await sm.LogUserMessageAsync(sessionConfig, input);
-                    await sm.LogAssistantMessageAsync(sessionConfig, result.Text);
-                }
+                Console.Error.WriteLine($"solvra: {ex.Message}");
+                context.ExitCode = 1;
+                return;
             }
-            catch (FileNotFoundException)
-            {
-                Console.WriteLine($"Session {id} not found.");
-            }
+
+            Console.WriteLine($"Resumed session {id} with {info.Messages.Count} messages.");
+            var s = AgentHost.Build(config);
+            var mode = plan ? "plan" : (auto ? "auto" : config.PermissionMode);
+            var session = info.Config with { PermissionMode = mode, AllowedTools = config.AllowedTools, DisallowedTools = config.DisallowedTools };
+            await new ChatRepl(s, session, new List<Message>(info.Messages), auto).RunAsync(ct);
         });
 
         // --- solvra session delete <id> ---
         var sessionDeleteArg = new Argument<string>("id", "Session ID to delete");
         var sessionDeleteCmd = new Command("delete", "Delete a session") { sessionDeleteArg };
-        sessionDeleteCmd.SetHandler(async (string id) =>
+        sessionDeleteCmd.SetHandler(async (context) =>
         {
+            var id = context.ParseResult.GetValueForArgument(sessionDeleteArg);
+            if (!SessionManager.IsValidSessionId(id))
+            {
+                Console.Error.WriteLine($"solvra: invalid session id '{id}'");
+                context.ExitCode = 1;
+                return;
+            }
             var config = await ConfigLoader.LoadAsync();
             var sm = new SessionManager(config.SessionsDir);
             var filePath = Path.Combine(config.SessionsDir, $"{id}.jsonl");
@@ -643,8 +571,9 @@ public static class Program
             else
             {
                 Console.WriteLine($"Session {id} not found.");
+                context.ExitCode = 1;
             }
-        }, sessionDeleteArg);
+        });
 
         sessionCommand.AddCommand(sessionListCommand);
         sessionCommand.AddCommand(sessionShowCommand);
@@ -677,6 +606,7 @@ public static class Program
             if (skills.Count == 0) Console.WriteLine("No skills found in skills/ directory.");
         });
 
+
         rootCommand.AddCommand(runCommand);
         rootCommand.AddCommand(chatCommand);
         rootCommand.AddCommand(modelsCommand);
@@ -686,26 +616,18 @@ public static class Program
         rootCommand.AddCommand(toolsCmd);
         rootCommand.AddCommand(skillsCmd);
 
-        return await rootCommand.InvokeAsync(args);
+        return rootCommand;
     }
 
-    private static (ModelRouter Router, ToolRegistry Registry, HookEngine HookEngine, AuditLogger AuditLogger, SkillLoader SkillLoader, MemoryManager MemoryManager, PermissionChecker PermissionChecker, Tracer Tracer) BuildSubsystems(SolvraConfig config)
+    private static bool ApplyCwd(string? cwd)
     {
-        var router = new ModelRouter();
-        var auditLogger = new AuditLogger(SolvraPaths.LogsDir);
-        var sandbox = new SandboxManager(new SandboxConfig());
-        var registry = new ToolRegistry(auditLogger);
-        registry.RegisterBuiltins(sandbox);
-
-        var hookEngine = new HookEngine();
-        var skillLoader = new SkillLoader(config.SkillsDir);
-        var memoryManager = new MemoryManager(config.MemoryDir);
-        var permissionChecker = new PermissionChecker();
-        var tracer = new Tracer(Path.Combine(SolvraPaths.LogsDir, "traces.jsonl"));
-
-        // P5: Subscribe Printer once at process startup (not per AgentLoop instance)
-        tracer.OnSpanEvent += Printer.HandleSpanEvent;
-
-        return (router, registry, hookEngine, auditLogger, skillLoader, memoryManager, permissionChecker, tracer);
+        if (string.IsNullOrEmpty(cwd)) return true;
+        if (!Directory.Exists(cwd))
+        {
+            Console.Error.WriteLine($"solvra: --cwd directory not found: {cwd}");
+            return false;
+        }
+        Directory.SetCurrentDirectory(cwd);
+        return true;
     }
 }

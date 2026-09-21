@@ -28,7 +28,7 @@ public class MemoryRecallTool : ToolBase
         if (string.IsNullOrWhiteSpace(query))
             return new ToolExecuteResult("Error: query is required", true);
 
-        var memoryDir = Path.Combine(context.Cwd, "memory");
+        var memoryDir = Solvra.Config.SolvraPaths.MemoryDir;
         var manager = new MemoryManager(memoryDir);
         var results = await manager.SearchAsync(query);
 
