@@ -144,4 +144,75 @@ Test instructions.");
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public async Task ReloadReturnsAddedChangedAndRemovedDiff()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"skills_reload_{Guid.NewGuid():N}");
+        var firstDir = Path.Combine(tempDir, "first");
+        var secondDir = Path.Combine(tempDir, "second");
+        Directory.CreateDirectory(firstDir);
+        try
+        {
+            await WriteSkill(firstDir, "first", "version one");
+            var loader = new SkillLoader(tempDir);
+            var initial = await loader.ReloadAsync();
+            Assert.Equal(new[] { "first" }, initial.Added);
+            Assert.Empty(initial.Removed);
+            Assert.Empty(initial.Changed);
+
+            await WriteSkill(firstDir, "first", "version two");
+            Directory.CreateDirectory(secondDir);
+            await WriteSkill(secondDir, "second", "new skill");
+            var update = loader.Reload();
+            Assert.Equal(new[] { "second" }, update.Added);
+            Assert.Equal(new[] { "first" }, update.Changed);
+
+            Directory.Delete(firstDir, recursive: true);
+            var removal = await loader.ReloadAsync();
+            Assert.Equal(new[] { "first" }, removal.Removed);
+            Assert.Equal("second", Assert.Single(await loader.GetAllSkillsAsync()).Name);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedReloadRetainsPriorSnapshot()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"skills_rollback_{Guid.NewGuid():N}");
+        var firstDir = Path.Combine(tempDir, "first");
+        var duplicateDir = Path.Combine(tempDir, "duplicate");
+        Directory.CreateDirectory(firstDir);
+        try
+        {
+            await WriteSkill(firstDir, "stable", "original");
+            var loader = new SkillLoader(tempDir);
+            await loader.ReloadAsync();
+
+            Directory.CreateDirectory(duplicateDir);
+            await WriteSkill(duplicateDir, "stable", "ambiguous replacement");
+            await Assert.ThrowsAsync<InvalidDataException>(() => loader.ReloadAsync());
+
+            var retained = Assert.Single(await loader.GetAllSkillsAsync());
+            Assert.Equal("stable", retained.Name);
+            Assert.Contains("original", retained.Content);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    private static Task WriteSkill(string directory, string name, string body) =>
+        File.WriteAllTextAsync(Path.Combine(directory, "SKILL.md"), $"""
+            ---
+            name: {name}
+            description: test
+            trigger_patterns: ["test"]
+            ---
+            {body}
+            """);
 }

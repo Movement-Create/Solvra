@@ -4,12 +4,14 @@ using System.Diagnostics;
 using System.Text.Json;
 using Solvra.Models;
 using Solvra.Security;
+using Solvra.Core;
 
 namespace Solvra.Tools;
 
 public class ToolRegistry : IToolRegistry
 {
     private readonly Dictionary<string, ITool> _tools = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _sync = new();
     private readonly PermissionChecker _permissionChecker = new();
     private readonly AuditLogger? _auditLogger;
 
@@ -18,27 +20,51 @@ public class ToolRegistry : IToolRegistry
         _auditLogger = auditLogger;
     }
 
-    public void RegisterTool(ITool tool, bool force = false)
+    public IDisposable RegisterTool(ITool tool, bool force = false)
     {
-        if (_tools.ContainsKey(tool.Name) && !force)
-            throw new InvalidOperationException($"Tool \"{tool.Name}\" is already registered. Use force=true to override.");
+        ArgumentNullException.ThrowIfNull(tool);
+        lock (_sync)
+        {
+            if (_tools.ContainsKey(tool.Name) && !force)
+                throw new InvalidOperationException($"Tool \"{tool.Name}\" is already registered. Use force=true to override.");
 
-        _tools[tool.Name] = tool;
+            _tools[tool.Name] = tool;
+        }
+
+        return new RegistrationHandle(() =>
+        {
+            lock (_sync)
+            {
+                if (_tools.TryGetValue(tool.Name, out var current) && ReferenceEquals(current, tool))
+                    _tools.Remove(tool.Name);
+            }
+        });
     }
 
     // Explicit IToolRegistry implementation
-    void IToolRegistry.RegisterTool(ITool tool) => RegisterTool(tool);
+    IDisposable IToolRegistry.RegisterTool(ITool tool) => RegisterTool(tool);
+
+    public bool Unregister(string name)
+    {
+        lock (_sync)
+            return _tools.Remove(name);
+    }
 
     public ITool? GetTool(string name)
     {
-        return _tools.TryGetValue(name, out var tool) ? tool : null;
+        lock (_sync)
+            return _tools.TryGetValue(name, out var tool) ? tool : null;
     }
 
-    public IReadOnlyList<ITool> GetAllTools() => _tools.Values.ToList();
+    public IReadOnlyList<ITool> GetAllTools()
+    {
+        lock (_sync)
+            return _tools.Values.ToList();
+    }
 
     public IReadOnlyList<ToolDefinition> GetToolDefinitions()
     {
-        return _tools.Values.Select(tool =>
+        return GetAllTools().Select(tool =>
         {
             var schemaElement = tool.GetInputSchema();
             var schema = JsonSerializer.Deserialize<ToolInputSchema>(schemaElement.GetRawText())
@@ -60,7 +86,7 @@ public class ToolRegistry : IToolRegistry
     {
         var tool = GetTool(name);
         if (tool == null)
-            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", _tools.Keys.OrderBy(k => k))}", true);
+            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", GetAllTools().Select(t => t.Name).OrderBy(k => k))}", true);
 
         if (!IsToolAllowed(name, context.Session))
             return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);
@@ -99,7 +125,7 @@ public class ToolRegistry : IToolRegistry
     {
         var tool = GetTool(name);
         if (tool == null)
-            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", _tools.Keys.OrderBy(k => k))}", true);
+            return new ToolExecuteResult($"Tool \"{name}\" not found. Available tools: {string.Join(", ", GetAllTools().Select(t => t.Name).OrderBy(k => k))}", true);
 
         if (!IsToolAllowed(name, context.Session))
             return new ToolExecuteResult($"Tool \"{name}\" is not allowed in this session.", true);

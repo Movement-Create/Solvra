@@ -7,7 +7,8 @@ namespace Solvra.Tools;
 
 public interface IToolRegistry
 {
-    void RegisterTool(ITool tool);
+    IDisposable RegisterTool(ITool tool);
+    bool Unregister(string name);
     void RegisterBuiltins(Security.SandboxManager sandbox);
     IReadOnlyList<Models.ToolDefinition> GetToolDefinitions();
     ITool? GetTool(string name);

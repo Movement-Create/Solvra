@@ -7,7 +7,8 @@ namespace Solvra.Skills;
 public class SkillLoader
 {
     private readonly string _skillsDir;
-    private readonly Dictionary<string, SkillDefinition> _skills = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, SkillDefinition> _skills = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);
     private long _lastScanTicks;
     private static readonly long RescanIntervalTicks = TimeSpan.FromSeconds(30).Ticks;
 
@@ -19,7 +20,9 @@ public class SkillLoader
     public async Task<IReadOnlyList<SkillDefinition>> GetAllSkillsAsync()
     {
         await ScanIfStaleAsync();
-        return _skills.Values.ToList();
+        await _reloadLock.WaitAsync();
+        try { return _skills.Values.ToList(); }
+        finally { _reloadLock.Release(); }
     }
 
     public async Task<List<SkillDefinition>> GetRelevantSkillsAsync(string prompt)
@@ -28,8 +31,12 @@ public class SkillLoader
 
         var lowerPrompt = prompt.ToLowerInvariant();
         var results = new List<SkillDefinition>();
+        IReadOnlyList<SkillDefinition> snapshot;
+        await _reloadLock.WaitAsync();
+        try { snapshot = _skills.Values.ToList(); }
+        finally { _reloadLock.Release(); }
 
-        foreach (var skill in _skills.Values)
+        foreach (var skill in snapshot)
         {
             if (skill.AlwaysInject)
             {
@@ -76,30 +83,73 @@ public class SkillLoader
         if (now - _lastScanTicks < RescanIntervalTicks && _skills.Count > 0)
             return;
 
-        await ScanSkillsDirAsync();
-        _lastScanTicks = now;
-    }
-
-    private async Task ScanSkillsDirAsync()
-    {
-        if (!Directory.Exists(_skillsDir)) return;
-
-        foreach (var dir in Directory.EnumerateDirectories(_skillsDir))
+        try
         {
-            var skillFile = Path.Combine(dir, "SKILL.md");
-            if (!File.Exists(skillFile)) continue;
-
-            try
-            {
-                var skill = await LoadSkillFileAsync(skillFile, Path.GetFileName(dir));
-                if (skill != null)
-                    _skills[skill.Name] = skill;
-            }
-            catch { }
+            await ReloadAsync();
+        }
+        catch
+        {
+            // Periodic discovery stays available on the last validated snapshot.
+            // Explicit Reload/ReloadAsync calls surface the validation error.
+            _lastScanTicks = now;
         }
     }
 
-    private static async Task<SkillDefinition?> LoadSkillFileAsync(string path, string dirName)
+    /// <summary>
+    /// Build and validate a complete skill snapshot before swapping it into use.
+    /// The previous snapshot remains active if any file cannot be read or duplicate
+    /// skill names make the candidate ambiguous.
+    /// </summary>
+    public async Task<SkillReloadDiff> ReloadAsync()
+    {
+        var candidate = new Dictionary<string, SkillDefinition>(StringComparer.OrdinalIgnoreCase);
+
+        if (Directory.Exists(_skillsDir))
+        {
+            foreach (var dir in Directory.EnumerateDirectories(_skillsDir).OrderBy(path => path, StringComparer.Ordinal))
+            {
+                var skillFile = Path.Combine(dir, "SKILL.md");
+                if (!File.Exists(skillFile)) continue;
+                var skill = await LoadSkillFileAsync(skillFile, Path.GetFileName(dir));
+                if (string.IsNullOrWhiteSpace(skill.Name))
+                    throw new InvalidDataException($"Skill in {skillFile} has an empty name.");
+                if (!candidate.TryAdd(skill.Name, skill))
+                    throw new InvalidDataException($"Duplicate skill name \"{skill.Name}\".");
+            }
+        }
+
+        await _reloadLock.WaitAsync();
+        try
+        {
+            var added = candidate.Keys.Except(_skills.Keys, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+            var removed = _skills.Keys.Except(candidate.Keys, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+            var changed = candidate.Keys.Intersect(_skills.Keys, StringComparer.OrdinalIgnoreCase)
+                .Where(name => !SkillEquals(candidate[name], _skills[name]))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+            _skills = candidate;
+            _lastScanTicks = DateTime.UtcNow.Ticks;
+            return new SkillReloadDiff(added, removed, changed);
+        }
+        finally
+        {
+            _reloadLock.Release();
+        }
+    }
+
+    public SkillReloadDiff Reload() => ReloadAsync().GetAwaiter().GetResult();
+
+    private static bool SkillEquals(SkillDefinition left, SkillDefinition right) =>
+        left.Name == right.Name &&
+        left.Description == right.Description &&
+        left.TriggerPatterns.SequenceEqual(right.TriggerPatterns) &&
+        left.AlwaysInject == right.AlwaysInject &&
+        left.ToolsRequired.SequenceEqual(right.ToolsRequired) &&
+        left.Content == right.Content &&
+        left.FilePath == right.FilePath;
+
+    private static async Task<SkillDefinition> LoadSkillFileAsync(string path, string dirName)
     {
         var content = await File.ReadAllTextAsync(path);
         var (frontmatter, body) = ParseFrontmatter(content);
@@ -167,3 +217,8 @@ public class SkillLoader
             .ToList();
     }
 }
+
+public sealed record SkillReloadDiff(
+    IReadOnlyList<string> Added,
+    IReadOnlyList<string> Removed,
+    IReadOnlyList<string> Changed);

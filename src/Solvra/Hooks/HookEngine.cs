@@ -1,24 +1,42 @@
 #nullable enable
 
 using System.Text.Json;
+using Solvra.Core;
 
 namespace Solvra.Hooks;
 
 public class HookEngine
 {
     private readonly List<IHook> _hooks = new();
+    private readonly object _sync = new();
 
-    public void Register(IHook hook)
+    public IDisposable Register(IHook hook)
     {
-        _hooks.Add(hook);
+        ArgumentNullException.ThrowIfNull(hook);
+        lock (_sync)
+            _hooks.Add(hook);
+        return new RegistrationHandle(() =>
+        {
+            lock (_sync)
+            {
+                var index = _hooks.FindIndex(candidate => ReferenceEquals(candidate, hook));
+                if (index >= 0)
+                    _hooks.RemoveAt(index);
+            }
+        });
     }
 
     public void Unregister(string hookId)
     {
-        _hooks.RemoveAll(h => h.Id == hookId);
+        lock (_sync)
+            _hooks.RemoveAll(h => h.Id == hookId);
     }
 
-    public IReadOnlyList<IHook> GetHooks() => _hooks.AsReadOnly();
+    public IReadOnlyList<IHook> GetHooks()
+    {
+        lock (_sync)
+            return _hooks.ToList().AsReadOnly();
+    }
 
     public async Task<HookResult> FirePreToolUseAsync(string sessionId, int turn, ToolCallInfo toolCall)
     {
@@ -57,7 +75,7 @@ public class HookEngine
 
     private async Task<HookResult> RunHooksAsync(HookContext context, HookEvent eventType, string? toolName)
     {
-        var relevant = _hooks.Where(h =>
+        var relevant = GetHooks().Where(h =>
         {
             if (h.Event != eventType) return false;
 

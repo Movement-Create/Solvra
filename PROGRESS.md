@@ -1,5 +1,35 @@
 # Solvra harness fixes — progress
 
+# Composability Part 1D — 2026-09-23
+
+Worktree: `/home/cosmos/wt/github/Solvra/composability-1d`, branch
+`composability-1d`, based on `origin/main` at `25db057`.
+
+Prepared reversible component registration without changing the live service. Tool registration
+now returns an idempotent `IDisposable`; disposing removes only the same tool instance, so a stale
+handle cannot remove a forced replacement. The existing duplicate policy remains explicit
+(`force: false` rejects, `force: true` replaces), and `Unregister(name)` removes the current owner.
+Hook registration returns the same handle shape while preserving the existing behavior that
+duplicate hook IDs may coexist; handle disposal removes one exact hook and `Unregister(id)` keeps
+its existing remove-all behavior. Existing callers compile unchanged when they discard the return.
+
+`SkillLoader.ReloadAsync()` and `Reload()` build a complete candidate snapshot, reject duplicate
+or empty names, atomically swap only after validation, and return added/removed/changed names.
+Explicit reload surfaces validation failures; periodic discovery retains the last valid snapshot.
+There is still no watcher and no change to serve, cron, webhook, config or provider behavior.
+
+Verification: all 327 tests pass. New coverage includes duplicate policy, double disposal, stale
+handles, prior-state restoration, add/change/delete skill diffs and failed-snapshot rollback. An
+isolated detailed run measured one skill add at 15.65 ms, change at 3.87 ms and delete at 5.52 ms;
+10,000 tool+hook register/dispose pairs took 5.36 ms and retained 328 bytes after forced GC on this
+run. A collectible `AssemblyLoadContext` loaded and released the Solvra assembly in isolation,
+showing CLR unloadability; Solvra still lacks a plugin assembly contract and dependency boundary,
+so that probe does not justify dynamic tool assemblies yet. No provider call or process restart
+occurred, and the installed build plus `solvra.service` remain untouched.
+
+Remaining: review and publish this branch under the repository's rules; use the Part 1 review to
+choose whether Part 2 needs only registry/skill reload or a later isolated assembly plugin layer.
+
 Branch `harness-fixes` (worktree `~/wt/github/Solvra/harness-fixes`), based on `zen-go-session` (ff83703).
 Source of the issue list: `/tmp/solvra-eval/REPORT.md` (live evaluation on 2026-09-21).
 Committed and pushed to main on 2026-09-21 at the user's request.
