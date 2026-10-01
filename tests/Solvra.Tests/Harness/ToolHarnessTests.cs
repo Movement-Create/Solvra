@@ -51,6 +51,19 @@ public class ToolHarnessTests : IDisposable
     }
 
     [Fact]
+    public async Task Bash_RequestedTimeout_IsCappedByRunDeadline()
+    {
+        var context = Ctx() with { Deadline = new RunDeadline(TimeSpan.FromMilliseconds(250)) };
+        var sw = Stopwatch.StartNew();
+        var r = await new BashTool(new SandboxManager()).ExecuteAsync(
+            In(new { command = "sleep 20", timeout_ms = 600_000 }), context);
+
+        Assert.True(r.IsError);
+        Assert.Contains("timed out", r.Output);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
     public async Task Bash_StdinIsClosed()
     {
         var sw = Stopwatch.StartNew();
@@ -103,6 +116,34 @@ public class ToolHarnessTests : IDisposable
         Assert.False(r.IsError, r.Output);
         Assert.Contains("PID", r.Output);
         Assert.Contains("solvra-bg", r.Output);
+    }
+
+    [Fact]
+    public async Task Bash_Background_IsKilledWhenRunTrackerIsDisposed()
+    {
+        var tracker = new RunProcessTracker();
+        var r = await new BashTool(new SandboxManager()).ExecuteAsync(
+            In(new { command = "sleep 20", background = true }),
+            Ctx() with { ProcessTracker = tracker });
+        var match = System.Text.RegularExpressions.Regex.Match(r.Output, @"PID (\d+)");
+        Assert.True(match.Success, r.Output);
+        var pid = int.Parse(match.Groups[1].Value);
+
+        tracker.Dispose();
+        for (var i = 0; i < 20 && IsRunning(pid); i++)
+            await Task.Delay(50);
+        Assert.False(IsRunning(pid), $"background pid {pid} survived run cleanup");
+    }
+
+    private static bool IsRunning(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
     }
 
     [Fact]
@@ -172,6 +213,26 @@ public class ToolHarnessTests : IDisposable
         var miss = await tool.ExecuteAsync(In(new { path, old_string = "b = 3;   \nnope", new_string = "x" }), Ctx());
         Assert.True(miss.IsError);
         Assert.Contains("line 2", miss.Output);
+    }
+
+    [Fact]
+    public async Task FileEdit_ExactReplacement_PreservesEveryByteOutsideSpan()
+    {
+        var path = Path.Combine(_dir, "credentials.env");
+        var prefix = new byte[] { 0xEF, 0xBB, 0xBF };
+        var originalText = "URL=https://user:secret@example.test/path\r\nTOKEN=old-token";
+        await File.WriteAllBytesAsync(path, prefix.Concat(System.Text.Encoding.UTF8.GetBytes(originalText)).ToArray());
+
+        var oldValue = "https://user:secret@example.test/path";
+        var replacement = "<REDACTED_URL>";
+        var result = await new FileEditTool().ExecuteAsync(
+            In(new { path, old_string = oldValue, new_string = replacement }), Ctx());
+
+        Assert.False(result.IsError, result.Output);
+        var expectedText = originalText.Replace(oldValue, replacement, StringComparison.Ordinal);
+        var expected = prefix.Concat(System.Text.Encoding.UTF8.GetBytes(expectedText)).ToArray();
+        Assert.Equal(expected, await File.ReadAllBytesAsync(path));
+        Assert.DoesNotContain("'", expectedText); // value-only replacement added no incidental quoting
     }
 
     [Fact]

@@ -14,6 +14,17 @@ public static class Context
     private const int MicroCompactKeepChars = 2_000;
     private const int KeepRecentToolResults = 6;
 
+    public const string VerificationInstructions = """
+
+Verification discipline:
+- Establish input and output contracts, including shapes and partitioning conventions, before implementation.
+- Check which runtimes and tools are actually available; never claim a test ran when it could not run.
+- When repeated full executions fail, switch to small diagnostics for parsing, intermediate values, and assumptions.
+- If runtime or resource limits are part of correctness, measure them early under representative conditions.
+- For exact substitutions, change only the requested value and verify that bytes outside approved spans are unchanged.
+- Match validation to the real execution environment; browser behavior requires browser-level testing.
+""";
+
     private static readonly Dictionary<string, int> ModelContextLimits = new()
     {
         ["claude-3-5-sonnet-20241022"] = 200_000,
@@ -117,7 +128,7 @@ public static class Context
         var parts = new List<string>();
 
         // A custom system prompt replaces the default instructions instead of being stacked on them.
-        parts.Add(string.IsNullOrEmpty(basePrompt) ? DefaultInstructions : basePrompt);
+        parts.Add((string.IsNullOrEmpty(basePrompt) ? DefaultInstructions : basePrompt) + VerificationInstructions);
 
         if (!string.IsNullOrEmpty(environment))
             parts.Add(environment);

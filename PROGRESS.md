@@ -1,5 +1,62 @@
 # Solvra harness fixes — progress
 
+## Deadline, telemetry, and verification regressions — 2026-10-01
+
+Worktree: `/home/cosmos/wt/github/Solvra/deadline-verification`, branch
+`fix/deadline-verification`, based on `main` at `aadbff5`.
+
+Implemented a monotonic run deadline exposed as `--time-limit-seconds`. The parent loop, provider
+calls, retry waits, tools, reflection, and subagents share one budget; bash and code-run timeouts
+are capped by the remaining budget. Deadline completion has its own stop reason and exit code.
+The loop gives a late-budget warning that asks for a saved result and targeted checks without
+forbidding further edits.
+
+Audit telemetry now writes model/tool started and completed lifecycle records with stable operation
+IDs and writes provider-reported versus estimated usage after every completed model call. Deadline
+cancellation writes an interrupted-operation record and returns all completed usage and conversation
+state. Tool timing uses a distinct `tool_execution_metrics` event, eliminating the old ambiguous
+double count. Lifecycle records omit tool inputs and outputs so cancellation evidence does not copy
+credentials or command contents.
+
+The default agent instructions now require explicit contracts, honest reporting of unavailable
+validation, targeted diagnostics after repeated full-run failures, early performance measurement,
+byte-scoped exact replacements, and browser-level checks for browser behavior. Regression metadata
+and individually identified browser payloads live under `evals/regressions/`. The Harbor adapter
+accepts an internal deadline and reconstructs partial token usage from audit logs when final JSON is
+missing. Harbor does not expose its outer timeout through `AgentContext`; job configuration must set
+`time_limit_seconds` to the task timeout minus a cleanup allowance.
+
+An explicit browser/XSS task now gets one bounded verification-gate turn if the model tries to finish
+without browser-automation evidence. The reminder requires Chromium/Selenium, Playwright, Puppeteer,
+or equivalent execution and asks for an honest unverified result if no browser can run. It does not
+gate ordinary HTML parsing or JavaScript work.
+
+Verification: baseline 327/327 tests passed after restore; final suite is 338/338. Added coverage
+includes monotonic expiry, 600-second requests capped to a subsecond remaining budget, process-tree
+cancellation, partial usage and interruption telemetry, lifecycle redaction, exact replacement
+preserving UTF-8 BOM/CRLF/all bytes outside the span, and the browser gate's extra turn. Harbor adapter
+tests pass 2/2; regression metadata/browser corpus validation, Python compilation, shell syntax, CLI
+help, self-contained publish, and `git diff --check` pass.
+
+Controlled Terminal-Bench 2.1 runs with `chatgpt:gpt-5.6-sol` high reasoning:
+
+- `sanitize-git-repo`: passed 1/1. The agent used byte-scoped replacement and exact-diff checks.
+- `gpt2-codegolf`: finished normally before the deadline and switched to targeted checkpoint probes,
+  but scored 0 because its output omitted the start of the expected continuation. It compiled, stayed
+  under 5,000 bytes, and ran in 4.46 seconds in the verifier.
+- `filter-js-from-html` before the gate: 12/28 browser batches raised alerts. After the gate, Solvra ran
+  Chromium/Selenium with positive controls, found a malformed-quote bypass, and reduced the independent
+  verifier failures to 3/28 batches. The score remained 0. The benchmark's separate clean-output check
+  still reports 5/12 failures from comparing BeautifulSoup-normalized input with raw preserved bytes.
+- `torch-tensor-parallelism`: no scored model attempt. Six Harbor starts and one direct isolated-image
+  start failed at the first .NET TLS request with zero token usage. Simple calls sometimes succeeded in
+  the same image later, so this remains an adapter/environment transport blocker. Static review confirms
+  the corrected 2.1 prompt explicitly says row-parallel input is already sharded.
+
+No push, deployment, or service restart occurred. Benchmark artifacts are under `/data/tb2/jobs/`
+with job names `tb21-solvra-deadline-900-r1`, `tb21-solvra-html-r1`, and `tb21-solvra-html-r2`;
+the tensor transport attempts use `tb21-solvra-tensor-r1` through `r5`.
+
 # Composability Part 1D — 2026-09-23
 
 Worktree: `/home/cosmos/wt/github/Solvra/composability-1d`, branch

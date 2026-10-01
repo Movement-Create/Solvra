@@ -1,0 +1,3 @@
+terminal-bench/gpt2-codegolf
+terminal-bench/torch-tensor-parallelism
+terminal-bench/sanitize-git-repo

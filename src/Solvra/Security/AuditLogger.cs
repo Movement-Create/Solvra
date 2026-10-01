@@ -64,9 +64,15 @@ public class AuditLogger : IAsyncDisposable
         }
     }
 
-    public Task LogToolExecutionAsync(string sessionId, string toolName, bool isError, long durationMs)
+    public Task LogToolExecutionAsync(string sessionId, string toolName, bool isError, long durationMs, string? operationId = null)
     {
-        return LogAsync("tool_execution", new { tool = toolName, is_error = isError, duration_ms = durationMs }, sessionId);
+        return LogAsync("tool_execution_metrics", new
+        {
+            operation_id = operationId,
+            tool = toolName,
+            is_error = isError,
+            duration_ms = durationMs
+        }, sessionId);
     }
 
     public Task LogSessionStartAsync(string sessionId, string? title = null)

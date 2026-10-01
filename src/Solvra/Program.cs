@@ -65,12 +65,13 @@ public static class Program
         var cwdOption = new Option<string?>("--cwd", "Working directory for tools and project instructions");
         var reflectOption = new Option<bool?>("--reflect", "Run the post-task lesson-saving pass (default: config 'reflection')");
         var noSessionOption = new Option<bool>("--no-session", "Do not write a session file");
+        var timeLimitOption = new Option<int?>("--time-limit-seconds", "Hard elapsed-time limit for this run (tools and subagents inherit it)");
 
         // --- solvra run <prompt> ---
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption })
+                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, timeLimitOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -149,6 +150,9 @@ public static class Program
                 Streaming = !outputJson,
                 OnText = outputJson ? null : text => Console.Write(text),
                 OnPermissionRequest = auto || !canPrompt ? null : AgentHost.AskOnConsole,
+                TimeLimit = p.GetValueForOption(timeLimitOption) is > 0 and var seconds
+                    ? TimeSpan.FromSeconds(seconds)
+                    : null,
             }, ct);
 
             await sessionMgr.LogResultAsync(sessionConfig, result);

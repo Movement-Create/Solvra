@@ -44,6 +44,8 @@ public class CodeRunTool : ToolBase
         var language = GetString(input, "language").ToLowerInvariant();
         var code = GetString(input, "code");
         var timeoutMs = Math.Clamp(GetInt(input, "timeout_ms", 120_000), 1, SandboxConfig.MaxTimeoutMs);
+        if (context.Deadline != null)
+            timeoutMs = context.Deadline.CapTimeoutMilliseconds(timeoutMs);
 
         if (!Languages.TryGetValue(language, out var langInfo))
             return new ToolExecuteResult($"Unsupported language: {language}. Supported: {string.Join(", ", Languages.Keys)}", true);

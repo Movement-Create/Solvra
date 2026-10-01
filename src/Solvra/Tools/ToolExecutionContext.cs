@@ -15,6 +15,15 @@ public record ToolExecutionContext(
     Dictionary<string, string> Env,
     SessionInfo Session)
 {
+    /// <summary>Shared run deadline; tools must cap their own timeout to its remaining time.</summary>
+    public Core.RunDeadline? Deadline { get; init; }
+
+    /// <summary>Stable provider tool-call id used to correlate lifecycle and timing records.</summary>
+    public string? OperationId { get; init; }
+
+    /// <summary>Tracks detached commands so deadline and normal run cleanup can stop leftovers.</summary>
+    public Core.RunProcessTracker? ProcessTracker { get; init; }
+
     /// <summary>Nesting depth of the agent running this tool (0 = top level).</summary>
     public int SubagentDepth { get; init; }
 

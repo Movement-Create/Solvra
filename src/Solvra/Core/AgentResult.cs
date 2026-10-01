@@ -7,7 +7,8 @@ public enum StopReason
     Text,
     MaxTurns,
     MaxBudget,
-    Error
+    Error,
+    Deadline
 }
 
 public record AgentRunOptions
@@ -22,6 +23,15 @@ public record AgentRunOptions
     public Action<ToolCall>? OnToolCall { get; init; }
     public Action<ToolResult>? OnToolResult { get; init; }
     public int SubagentDepth { get; init; }
+
+    /// <summary>Maximum elapsed time for this run. Null means no deadline.</summary>
+    public TimeSpan? TimeLimit { get; init; }
+
+    /// <summary>Shared monotonic deadline inherited by subagents.</summary>
+    internal RunDeadline? Deadline { get; init; }
+
+    /// <summary>Shared ownership of detached processes created by this run and its subagents.</summary>
+    internal RunProcessTracker? ProcessTracker { get; init; }
 
     /// <summary>Working directory for tools and project instructions (default: process cwd).</summary>
     public string? Cwd { get; init; }

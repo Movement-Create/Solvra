@@ -48,6 +48,8 @@ public class BashTool : ToolBase
             ? (Path.IsPathRooted(c) ? c : Path.Combine(context.Cwd, c))
             : context.Cwd;
         var timeout = GetOptionalInt(input, "timeout_ms");
+        if (context.Deadline != null)
+            timeout = context.Deadline.CapTimeoutMilliseconds(timeout ?? _sandbox.Config.TimeoutMs);
         var background = input.TryGetProperty("background", out var bg) && bg.ValueKind == JsonValueKind.True;
 
         if (background)
@@ -92,11 +94,14 @@ public class BashTool : ToolBase
         if (_sandbox.Config.BlockDangerous && new DangerousCommandDetector().Detect(command) is { Dangerous: true } d)
             return new ToolExecuteResult($"[Blocked] {d.Reason}. The command was not run.", true);
 
-        var result = await _sandbox.ExecAsync(wrapper, cwd, context.Env, ct, 10_000);
+        var timeout = context.Deadline?.CapTimeoutMilliseconds(10_000) ?? 10_000;
+        var result = await _sandbox.ExecAsync(wrapper, cwd, context.Env, ct, timeout);
         if (result.Blocked)
             return new ToolExecuteResult($"[Blocked] {result.BlockReason}. The command was not run.", true);
 
         var pid = result.Stdout.Trim();
+        if (int.TryParse(pid, out var processId))
+            context.ProcessTracker?.Register(processId);
         return new ToolExecuteResult(
             $"Started in background. PID {pid}. Output: {log}\n" +
             $"Check it with `tail -n 50 {log}`; stop it with `kill {pid}`.",

@@ -94,6 +94,8 @@ public static class AgentHost
                 SystemPrompt = req.SystemPrompt,
                 Streaming = false,
                 SubagentDepth = req.Depth,
+                Deadline = parent.Deadline,
+                ProcessTracker = parent.ProcessTracker,
                 OnPermissionRequest = parent.PermissionRequest,
                 Cwd = parent.Cwd,
                 LogToSession = false,
@@ -136,13 +138,14 @@ public static class AgentHost
         return Task.FromResult(answer is "y" or "yes");
     }
 
-    /// <summary>Exit code for a finished run: 0 done, 1 error, 2 turn limit, 3 budget limit.</summary>
+    /// <summary>Exit code: 0 done, 1 error, 2 turn limit, 3 budget limit, 4 deadline.</summary>
     public static int ExitCode(StopReason reason) => reason switch
     {
         StopReason.Text => 0,
         StopReason.Error => 1,
         StopReason.MaxTurns => 2,
         StopReason.MaxBudget => 3,
+        StopReason.Deadline => 4,
         _ => 1
     };
 }

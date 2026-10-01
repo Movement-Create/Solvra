@@ -115,6 +115,9 @@ public class AgentLoopHarnessTests : IDisposable
         Assert.Contains("401", result.Error);
         Assert.Single(provider.Calls); // 401 is not retried
         Assert.Equal(MessageRole.Assistant, result.Messages[^1].Role); // history stays usable
+        var audit = await File.ReadAllTextAsync(Path.Combine(_dir, "logs", $"audit-{DateTime.UtcNow:yyyy-MM-dd}.jsonl"));
+        Assert.Contains("model_call_failed", audit);
+        Assert.DoesNotContain("bad key", audit);
     }
 
     [Fact]
@@ -207,6 +210,26 @@ public class AgentLoopHarnessTests : IDisposable
     }
 
     [Fact]
+    public async Task BrowserDependentTask_GetsOneVerificationGateBeforeCompletion()
+    {
+        var provider = new ScriptedProvider()
+            .Then(ScriptedProvider.Text("string tests pass"))
+            .Then(options =>
+            {
+                var reminder = options.Messages[^1].Content.OfType<TextContent>().Single().Text;
+                Assert.Contains("browser automation", reminder, StringComparison.OrdinalIgnoreCase);
+                return ScriptedProvider.Text("browser validation unavailable; result is unverified");
+            });
+
+        var result = await Loop(provider).RunAsync(
+            Options("Remove executable JavaScript from HTML and block XSS"));
+
+        Assert.Equal(2, provider.Calls.Count);
+        Assert.Equal(2, result.Turns);
+        Assert.Equal("browser validation unavailable; result is unverified", result.Text);
+    }
+
+    [Fact]
     public async Task TurnLimit_IsReportedInText()
     {
         var provider = new ScriptedProvider()
@@ -215,6 +238,31 @@ public class AgentLoopHarnessTests : IDisposable
         var result = await Loop(provider).RunAsync(Options("loop", maxTurns: 2));
         Assert.Equal(StopReason.MaxTurns, result.StopReason);
         Assert.Contains("turn limit", result.Text);
+    }
+
+    [Fact]
+    public async Task Deadline_CancelsActiveTool_AndPreservesIncrementalUsageAndTelemetry()
+    {
+        var provider = new ScriptedProvider()
+            .Then(ScriptedProvider.Tool("bash", new { command = "sleep 20 # sentinel-credential", timeout_ms = 600_000 }, "slow-command"));
+        var registry = new ToolRegistry();
+        registry.RegisterTool(new BashTool(new SandboxManager()));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await Loop(provider, registry).RunAsync(
+            Options("run it") with { TimeLimit = TimeSpan.FromMilliseconds(300) });
+
+        Assert.Equal(StopReason.Deadline, result.StopReason);
+        Assert.Equal(10, result.Usage.InputTokens);
+        Assert.Equal(5, result.Usage.OutputTokens);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(4), $"took {sw.Elapsed}");
+
+        var audit = await File.ReadAllTextAsync(Path.Combine(_dir, "logs", $"audit-{DateTime.UtcNow:yyyy-MM-dd}.jsonl"));
+        Assert.Contains("model_call_completed", audit);
+        Assert.Contains("tool_call_started", audit);
+        Assert.Contains("operation_interrupted", audit);
+        Assert.Contains("deadline", audit);
+        Assert.DoesNotContain("sentinel-credential", audit);
     }
 
     [Fact]

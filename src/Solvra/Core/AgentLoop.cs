@@ -51,7 +51,67 @@ public sealed class AgentLoop
         _ = permissionChecker;
     }
 
+    private sealed class RunProgress
+    {
+        public int Turns;
+        public TokenUsage Usage = new();
+        public string LastText = "";
+        public IProvider? Provider;
+        public string Model = "";
+        public string? ActiveOperationId;
+        public string? ActiveOperationType;
+        public bool DeadlineWarningSent;
+        public bool BrowserVerificationReminderSent;
+        public bool BrowserValidationObserved;
+        public List<Message> Messages = [];
+    }
+
     public async Task<AgentRunResult> RunAsync(AgentRunOptions options, CancellationToken ct = default)
+    {
+        var ownsProcesses = options.ProcessTracker == null;
+        var processes = options.ProcessTracker ?? new RunProcessTracker();
+        try
+        {
+            return await RunWithDeadlineAsync(options with { ProcessTracker = processes }, ct);
+        }
+        finally
+        {
+            if (ownsProcesses) processes.Dispose();
+        }
+    }
+
+    private async Task<AgentRunResult> RunWithDeadlineAsync(AgentRunOptions options, CancellationToken ct)
+    {
+        var deadline = options.Deadline ?? (options.TimeLimit is { } limit ? new RunDeadline(limit) : null);
+        if (deadline == null)
+            return await RunCoreAsync(options, new RunProgress(), ct);
+
+        var progress = new RunProgress();
+        using var deadlineCts = deadline.CreateLinkedTokenSource(ct);
+        try
+        {
+            return await RunCoreAsync(options with { Deadline = deadline }, progress, deadlineCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline.IsExpired)
+        {
+            var cost = progress.Provider?.EstimateCost(progress.Model, progress.Usage.InputTokens, progress.Usage.OutputTokens) ?? 0m;
+            var note = $"[Stopped: task deadline reached after {deadline.Limit.TotalSeconds:F0} seconds.]";
+            await _auditLogger.LogAsync("operation_interrupted", new
+            {
+                operation_id = progress.ActiveOperationId,
+                operation_type = progress.ActiveOperationType,
+                reason = "deadline",
+                turns = progress.Turns,
+                usage = new { input = progress.Usage.InputTokens, output = progress.Usage.OutputTokens }
+            }, options.Session.Id);
+            await LogSessionEnd(options.Session.Id, progress.Turns, cost, "Deadline");
+            options.OnText?.Invoke("\n" + note + "\n");
+            return BuildResult(Join(progress.LastText, note), progress.Turns, progress.Usage, cost,
+                StopReason.Deadline, progress.Messages);
+        }
+    }
+
+    private async Task<AgentRunResult> RunCoreAsync(AgentRunOptions options, RunProgress progress, CancellationToken ct)
     {
         var sessionId = options.Session.Id;
         var cwd = options.Cwd ?? Directory.GetCurrentDirectory();
@@ -59,6 +119,7 @@ public sealed class AgentLoop
         if (options.History != null)
             messages.AddRange(options.History);
         messages.Add(Message.FromText(MessageRole.User, options.Prompt));
+        progress.Messages = messages;
 
         if (options.LogToSession)
             await SafeLog(() => _sessionManager.LogUserMessageAsync(options.Session, options.Prompt));
@@ -68,6 +129,8 @@ public sealed class AgentLoop
         try
         {
             (provider, resolvedModel) = _router.Resolve(options.Session.Model, options.Session.Provider);
+            progress.Provider = provider;
+            progress.Model = resolvedModel;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -101,6 +164,16 @@ public sealed class AgentLoop
         {
             ct.ThrowIfCancellationRequested();
             turns++;
+            progress.Turns = turns;
+
+            if (options.Deadline is { } deadline && !progress.DeadlineWarningSent &&
+                deadline.Remaining <= TimeSpan.FromSeconds(Math.Max(30, Math.Min(120, deadline.Limit.TotalSeconds * 0.2))))
+            {
+                progress.DeadlineWarningSent = true;
+                messages.Add(Message.FromText(MessageRole.User,
+                    $"Runtime notice: approximately {Math.Max(0, (int)deadline.Remaining.TotalSeconds)} seconds remain. " +
+                    "Prioritize a working saved result and targeted final checks; do not start a command longer than the remaining time."));
+            }
             using var turnSpan = _tracer.StartSpan("agent.turn", new Dictionary<string, object> { ["turn"] = turns, ["tokens"] = totalUsage.InputTokens + totalUsage.OutputTokens });
 
             var compressedMessages = Context.CompressContext(messages, resolvedModel, options.Session.Provider, overheadTokens);
@@ -119,6 +192,16 @@ public sealed class AgentLoop
             var separatorPending = streamedAnyText;
 
             LlmResponse response;
+            var modelCallId = $"llm-{sessionId}-{turns}-{Guid.NewGuid():N}";
+            progress.ActiveOperationId = modelCallId;
+            progress.ActiveOperationType = "model_call";
+            await _auditLogger.LogAsync("model_call_started", new
+            {
+                operation_id = modelCallId,
+                turn = turns,
+                model = resolvedModel,
+                estimated_input_tokens = Context.EstimateContextTokens(compressedMessages) + overheadTokens
+            }, sessionId);
             try
             {
                 using var llmSpan = _tracer.StartSpan("llm.call", new Dictionary<string, object>
@@ -155,6 +238,15 @@ public sealed class AgentLoop
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                await _auditLogger.LogAsync("model_call_failed", new
+                {
+                    operation_id = modelCallId,
+                    turn = turns,
+                    error_type = ex.GetType().Name,
+                    stop_reason = "error"
+                }, sessionId);
+                progress.ActiveOperationId = null;
+                progress.ActiveOperationType = null;
                 var cost = provider.EstimateCost(resolvedModel, totalUsage.InputTokens, totalUsage.OutputTokens);
                 return await FailAsync(options, sessionId, messages, lastText, turns, totalUsage, cost, ex.Message, provider, resolvedModel);
             }
@@ -171,9 +263,31 @@ public sealed class AgentLoop
                             string.Join("", response.ToolCalls.Select(t => JsonSerializer.Serialize(t.Input))))
                     }
                 };
+                await _auditLogger.LogAsync("model_call_completed", new
+                {
+                    operation_id = modelCallId,
+                    turn = turns,
+                    usage_source = "estimated",
+                    usage = new { input = response.Usage.InputTokens, output = response.Usage.OutputTokens },
+                    stop_reason = response.StopReason
+                }, sessionId);
+            }
+            else
+            {
+                await _auditLogger.LogAsync("model_call_completed", new
+                {
+                    operation_id = modelCallId,
+                    turn = turns,
+                    usage_source = "provider",
+                    usage = new { input = response.Usage.InputTokens, output = response.Usage.OutputTokens },
+                    stop_reason = response.StopReason
+                }, sessionId);
             }
 
             totalUsage += response.Usage;
+            progress.Usage = totalUsage;
+            progress.ActiveOperationId = null;
+            progress.ActiveOperationType = null;
 
             var currentCost = provider.EstimateCost(resolvedModel, totalUsage.InputTokens, totalUsage.OutputTokens);
 
@@ -205,9 +319,21 @@ public sealed class AgentLoop
                 }
 
                 lastText = lengthContinuations > 0 ? lastText + text : text;
+                progress.LastText = lastText;
                 messages.Add(new Message { Role = MessageRole.Assistant, Content = assistantContent.Count > 0 ? assistantContent : [new TextContent { Text = text }], Timestamp = Now() });
                 if (options.LogToSession)
                     await SafeLog(() => _sessionManager.LogAssistantMessageAsync(options.Session, lastText));
+
+                if (!progress.BrowserVerificationReminderSent && !progress.BrowserValidationObserved &&
+                    RequiresBrowserValidation(options.Prompt) && turns < options.Session.MaxTurns)
+                {
+                    progress.BrowserVerificationReminderSent = true;
+                    messages.Add(Message.FromText(MessageRole.User,
+                        "Verification gate: this task depends on browser parsing or JavaScript execution, but no browser automation has been run. " +
+                        "Use the available Chromium/Selenium, Playwright, Puppeteer, or equivalent browser runner against malformed and benign cases before finishing. " +
+                        "If browser execution is truly unavailable, state that explicitly and leave the result marked unverified."));
+                    continue;
+                }
 
                 await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, currentCost);
                 await _hookEngine.FireStopAsync(sessionId, turns, lastText);
@@ -226,13 +352,14 @@ public sealed class AgentLoop
                 });
             }
             if (!string.IsNullOrEmpty(response.Text)) lastText = response.Text;
+            progress.LastText = lastText;
 
             var assistantMessage = new Message { Role = MessageRole.Assistant, Content = assistantContent, Timestamp = Now() };
             messages.Add(assistantMessage);
             if (options.LogToSession)
                 await SafeLog(() => _sessionManager.LogAssistantTurnAsync(options.Session, assistantMessage));
 
-            var toolResults = await ExecuteToolCallsAsync(response, options, sessionId, turns, cwd, permissionMode, ct);
+            var toolResults = await ExecuteToolCallsAsync(response, options, sessionId, turns, cwd, permissionMode, progress, ct);
 
             messages.Add(new Message
             {
@@ -363,7 +490,7 @@ public sealed class AgentLoop
     /// </summary>
     private async Task<List<MessageContent>> ExecuteToolCallsAsync(
         LlmResponse response, AgentRunOptions options, string sessionId, int turn, string cwd,
-        PermissionMode permissionMode, CancellationToken ct)
+        PermissionMode permissionMode, RunProgress progress, CancellationToken ct)
     {
         var calls = response.ToolCalls;
         var results = new MessageContent[calls.Count];
@@ -375,13 +502,13 @@ public sealed class AgentLoop
             if (j - i >= 2)
             {
                 var batch = Enumerable.Range(i, j - i)
-                    .Select(async k => results[k] = await ExecuteOneAsync(calls[k], options, sessionId, turn, cwd, permissionMode, response.StopReason, ct));
+                    .Select(async k => results[k] = await ExecuteOneAsync(calls[k], options, sessionId, turn, cwd, permissionMode, response.StopReason, progress, ct));
                 await Task.WhenAll(batch);
                 i = j;
             }
             else
             {
-                results[i] = await ExecuteOneAsync(calls[i], options, sessionId, turn, cwd, permissionMode, response.StopReason, ct);
+                results[i] = await ExecuteOneAsync(calls[i], options, sessionId, turn, cwd, permissionMode, response.StopReason, progress, ct);
                 i++;
             }
         }
@@ -398,9 +525,11 @@ public sealed class AgentLoop
 
     private async Task<MessageContent> ExecuteOneAsync(
         ToolCall tc, AgentRunOptions options, string sessionId, int turn, string cwd,
-        PermissionMode permissionMode, string stopReason, CancellationToken ct)
+        PermissionMode permissionMode, string stopReason, RunProgress progress, CancellationToken ct)
     {
         options.OnToolCall?.Invoke(tc);
+        if (ProvidesBrowserValidationEvidence(tc))
+            progress.BrowserValidationObserved = true;
 
         ToolExecuteResult result;
         if (tc.Input.TryGetValue(OpenAiProvider.ArgumentParseErrorKey, out var rawArgs))
@@ -437,6 +566,9 @@ public sealed class AgentLoop
                         options.Session.AllowedTools.ToList(),
                         options.Session.DisallowedTools.ToList()))
                 {
+                    Deadline = options.Deadline,
+                    OperationId = tc.Id,
+                    ProcessTracker = options.ProcessTracker,
                     SubagentDepth = options.SubagentDepth,
                     PermissionRequest = options.OnPermissionRequest,
                     Model = options.Session.Model,
@@ -444,6 +576,14 @@ public sealed class AgentLoop
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
+                progress.ActiveOperationId = tc.Id;
+                progress.ActiveOperationType = "tool_call";
+                await _auditLogger.LogAsync("tool_call_started", new
+                {
+                    operation_id = tc.Id,
+                    turn,
+                    tool = tc.Name
+                }, sessionId);
                 using (var toolSpan = _tracer.StartSpan("tool.execute", new Dictionary<string, object>
                 {
                     ["tool"] = tc.Name,
@@ -458,6 +598,8 @@ public sealed class AgentLoop
                     sw.Stop();
                     _tracer.AddEvent("tool.result", new Dictionary<string, object> { ["tool"] = tc.Name, ["is_error"] = result.IsError, ["duration_ms"] = sw.ElapsedMilliseconds });
                 }
+                progress.ActiveOperationId = null;
+                progress.ActiveOperationType = null;
 
                 var post = await _hookEngine.FirePostToolUseAsync(sessionId, turn, hookInfo, new ToolResultInfo(result.Output, result.IsError));
                 if (post.ModifiedOutput != null)
@@ -470,14 +612,12 @@ public sealed class AgentLoop
 
         options.OnToolResult?.Invoke(new ToolResult { ToolUseId = tc.Id, Content = result.Output, IsError = result.IsError });
 
-        await _auditLogger.LogAsync("ToolExecution", new
+        await _auditLogger.LogAsync("tool_call_completed", new
         {
-            sessionId,
+            operation_id = tc.Id,
             turn,
-            toolName = tc.Name,
-            input = Printer.SummarizeInput(tc.Name, JsonSerializer.SerializeToElement(tc.Input)),
-            isError = result.IsError,
-            outputPreview = result.Output[..Math.Min(500, result.Output.Length)]
+            tool = tc.Name,
+            is_error = result.IsError
         }, sessionId);
 
         return new ToolResultContent
@@ -488,6 +628,24 @@ public sealed class AgentLoop
             Content = string.IsNullOrEmpty(result.Output) ? "(no output)" : result.Output,
             IsError = result.IsError
         };
+    }
+
+    internal static bool RequiresBrowserValidation(string prompt)
+    {
+        var text = prompt.ToLowerInvariant();
+        return text.Contains("xss", StringComparison.Ordinal) ||
+               (text.Contains("html", StringComparison.Ordinal) &&
+                (text.Contains("javascript", StringComparison.Ordinal) || text.Contains("browser", StringComparison.Ordinal)));
+    }
+
+    internal static bool ProvidesBrowserValidationEvidence(ToolCall call)
+    {
+        var input = JsonSerializer.Serialize(call.Input).ToLowerInvariant();
+        return input.Contains("webdriver", StringComparison.Ordinal) ||
+               input.Contains("playwright", StringComparison.Ordinal) ||
+               input.Contains("puppeteer", StringComparison.Ordinal) ||
+               input.Contains("chromium --headless", StringComparison.Ordinal) ||
+               input.Contains("chrome --headless", StringComparison.Ordinal);
     }
 
     private async Task<AgentRunResult> FailAsync(

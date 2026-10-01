@@ -109,7 +109,7 @@ public class ToolRegistry : IToolRegistry
 
         if (_auditLogger != null)
         {
-            await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds);
+            await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds, context.OperationId);
         }
 
         return result;
@@ -159,7 +159,7 @@ public class ToolRegistry : IToolRegistry
 
         if (_auditLogger != null)
         {
-            await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds);
+            await _auditLogger.LogToolExecutionAsync(context.SessionId, name, result.IsError, sw.ElapsedMilliseconds, context.OperationId);
         }
 
         return result;

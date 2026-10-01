@@ -1,0 +1,10 @@
+[
+  {"id":"script-element","html":"<p>safe</p><script>alert(1)</script>","benign":false},
+  {"id":"event-handler","html":"<img src=x onerror=alert(1)>","benign":false},
+  {"id":"javascript-url","html":"<a href=\"javascript:alert(1)\">x</a>","benign":false},
+  {"id":"svg-handler","html":"<svg onload=alert(1)></svg>","benign":false},
+  {"id":"mixed-case-url","html":"<a href=\"JaVaScRiPt:alert(1)\">x</a>","benign":false},
+  {"id":"encoded-url","html":"<a href=\"java&#x73;cript:alert(1)\">x</a>","benign":false},
+  {"id":"benign-table","html":"<table>\n  <tr><th>Name</th></tr>\n  <tr><td>Ada</td></tr>\n</table>\n","benign":true},
+  {"id":"benign-data-attribute","html":"<div data-note=\"a &amp; b\">text</div>","benign":true}
+]

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "historical_baseline": {
+    "dataset": "terminal-bench@2.0",
+    "solvra_revision": "aadbff5",
+    "model": "chatgpt:gpt-5.6-sol",
+    "reasoning_effort": "high",
+    "score": "21/25",
+    "trials_per_task": 1
+  },
+  "regressions": [
+    {
+      "id": "gpt2-codegolf",
+      "independent_checks": [
+        "source_size_under_5000_bytes",
+        "compiles_with_gcc_O3_lm",
+        "tokenizer_diagnostic",
+        "checkpoint_layout_diagnostic",
+        "twenty_token_correctness",
+        "runtime_under_90_seconds",
+        "tool_timeout_capped_by_remaining_budget",
+        "interrupted_usage_retained"
+      ]
+    },
+    {
+      "id": "filter-js-from-html",
+      "independent_checks": [
+        "each_payload_has_unique_id",
+        "browser_dialog_not_triggered",
+        "benign_representation_contract",
+        "browser_timeout_reported_separately"
+      ]
+    },
+    {
+      "id": "torch-tensor-parallelism",
+      "world_sizes": [1, 2, 4],
+      "bias_values": [false, true],
+      "input_contracts": ["column_full_input", "row_already_sharded_input"],
+      "independent_checks": ["weight_shards", "forward_output", "input_gradient", "weight_gradient", "bias_gradient"]
+    },
+    {
+      "id": "sanitize-git-repo",
+      "independent_checks": [
+        "sensitive_values_absent",
+        "placeholder_values_exact",
+        "bytes_outside_replacement_spans_unchanged",
+        "line_endings_and_bom_preserved"
+      ]
+    }
+  ]
+}

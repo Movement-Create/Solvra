@@ -30,6 +30,10 @@ public sealed class Reflection
         AgentRunOptions options,
         CancellationToken ct = default)
     {
+        // Reflection is part of the same run and must never reset the elapsed-time budget.
+        if (options.Deadline == null && options.TimeLimit is { } limit)
+            options = options with { Deadline = new RunDeadline(limit), TimeLimit = null };
+
         var result = await _agentLoop.RunAsync(options, ct);
 
         if (!_enabled || !ShouldReflect(result))
@@ -51,6 +55,8 @@ public sealed class Reflection
                 OnToolCall = null,
                 OnToolResult = null,
                 SubagentDepth = options.SubagentDepth,
+                Deadline = options.Deadline,
+                ProcessTracker = options.ProcessTracker,
                 Cwd = options.Cwd,
                 LogToSession = false
             }, ct);
