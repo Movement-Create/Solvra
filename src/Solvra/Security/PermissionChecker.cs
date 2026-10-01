@@ -29,6 +29,12 @@ public class PermissionChecker
                 return true;
             case PermissionMode.Plan:
                 return AllowedInPlanMode(tool);
+            case PermissionMode.AskAll:
+                // Local, non-mutating workspace inspection stays frictionless. Everything else asks.
+                if (tool.PermissionLevel == PermissionLevel.Read &&
+                    tool.Name is "file_read" or "glob" or "grep")
+                    return true;
+                return promptCallback != null && await promptCallback(tool);
         }
 
         if (tool.PermissionLevel is PermissionLevel.Read or PermissionLevel.Network)

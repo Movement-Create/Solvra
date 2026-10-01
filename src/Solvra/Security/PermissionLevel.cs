@@ -16,5 +16,6 @@ public enum PermissionMode
     Default,
     Auto,
     Plan,
+    AskAll,
     BypassPermissions
 }

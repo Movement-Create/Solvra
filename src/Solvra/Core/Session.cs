@@ -70,8 +70,11 @@ public sealed class SessionManager
     }
 
     public async Task LogUserMessageAsync(SessionConfig session, string content)
+        => await LogUserMessageAsync(session, Message.FromText(MessageRole.User, content));
+
+    public async Task LogUserMessageAsync(SessionConfig session, Message message)
     {
-        var data = JsonSerializer.SerializeToElement(new { content }, JsonOptions);
+        var data = JsonSerializer.SerializeToElement(new { content = message.Content });
         await AppendEventAsync(session, new SessionEvent
         {
             Type = "user_message",
@@ -218,8 +221,20 @@ public sealed class SessionManager
 
                     if (evt.Data.TryGetProperty("content", out var userContent))
                     {
-                        messages.Add(Message.FromText(MessageRole.User,
-                            userContent.GetString() ?? ""));
+                        if (userContent.ValueKind == JsonValueKind.Array)
+                        {
+                            try
+                            {
+                                var blocks = JsonSerializer.Deserialize<List<MessageContent>>(userContent.GetRawText());
+                                if (blocks is { Count: > 0 })
+                                    messages.Add(new Message { Role = MessageRole.User, Content = blocks, Timestamp = evt.Timestamp });
+                            }
+                            catch (JsonException) { }
+                        }
+                        else
+                        {
+                            messages.Add(Message.FromText(MessageRole.User, userContent.GetString() ?? ""));
+                        }
                     }
                     break;
 

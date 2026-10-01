@@ -165,7 +165,7 @@ public sealed class GoogleProvider : IProvider
         return (inputTokens * pricing.Input + outputTokens * pricing.Output) / 1_000_000m;
     }
 
-    private JsonObject BuildRequest(CompletionOptions options)
+    internal JsonObject BuildRequest(CompletionOptions options)
     {
         var contents = new JsonArray();
 
@@ -207,6 +207,30 @@ public sealed class GoogleProvider : IProvider
                                 ["response"] = new JsonObject { ["result"] = tr.Content }
                             }
                         });
+                        break;
+                    case ImageContent image:
+                        if (image.Source.SourceType == "base64")
+                        {
+                            parts.Add(new JsonObject
+                            {
+                                ["inlineData"] = new JsonObject
+                                {
+                                    ["mimeType"] = image.Source.MediaType,
+                                    ["data"] = image.Source.Data
+                                }
+                            });
+                        }
+                        else if (!string.IsNullOrEmpty(image.Source.Url))
+                        {
+                            parts.Add(new JsonObject
+                            {
+                                ["fileData"] = new JsonObject
+                                {
+                                    ["mimeType"] = image.Source.MediaType,
+                                    ["fileUri"] = image.Source.Url
+                                }
+                            });
+                        }
                         break;
                 }
             }

@@ -2,6 +2,9 @@
 
 using System.Text;
 using System.Text.Json;
+using Solvra.Core;
+using Solvra.Models;
+using Solvra.Providers;
 using Solvra.Security;
 
 namespace Solvra.Tools;
@@ -13,7 +16,7 @@ public class FileReadTool : ToolBase
     public override string Name => "file_read";
 
     public override string Description =>
-        $"Read a text file with line numbers. Returns at most {DefaultLineLimit} lines by default; use offset " +
+        $"Read a text file with line numbers, or attach a PNG, JPEG, WebP or GIF image to model context. Returns at most {DefaultLineLimit} lines by default; use offset " +
         "(1-based line to start from) and limit to page through large files. Long lines are clipped. " +
         "Binary files are refused. For a directory, lists its entries.";
 
@@ -45,6 +48,29 @@ public class FileReadTool : ToolBase
 
         if (!File.Exists(path))
             return new ToolExecuteResult($"Error: file not found: {path}", true);
+
+        var mime = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => null
+        };
+        if (mime != null)
+        {
+            var model = context.Model ?? "";
+            var colon = model.IndexOf(':');
+            if (colon > 0 && ModelRouter.BuiltinProviderIds.Contains(model[..colon])) model = model[(colon + 1)..];
+            if (!ModelCapabilities.SupportsVision(context.Provider ?? "", model))
+                return new ToolExecuteResult($"Error: {model} cannot read images.", true);
+            var imageSize = new FileInfo(path).Length;
+            if (imageSize > NdjsonChat.MaxImageBytes)
+                return new ToolExecuteResult($"Error: image is {imageSize} bytes; maximum is {NdjsonChat.MaxImageBytes} bytes.", true);
+            var data = Convert.ToBase64String(await File.ReadAllBytesAsync(path, ct));
+            return new ToolExecuteResult($"Attached image {Path.GetFileName(path)} ({imageSize} bytes).", false,
+                new ImageContent { Source = new ImageSource { SourceType = "base64", MediaType = mime, Data = data } });
+        }
 
         if (FileWalker.IsBinaryFile(path))
             return new ToolExecuteResult($"Error: {path} looks like a binary file ({new FileInfo(path).Length} bytes); not shown.", true);

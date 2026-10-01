@@ -192,6 +192,35 @@ public class ToolHarnessTests : IDisposable
     }
 
     [Fact]
+    public async Task FileRead_AttachesSupportedImageForVisionModel()
+    {
+        var path = Path.Combine(_dir, "probe.png");
+        await File.WriteAllBytesAsync(path, [0x89, 0x50, 0x4e, 0x47]);
+        var context = Ctx() with { Provider = "chatgpt", Model = "gpt-5.6-sol" };
+
+        var result = await new FileReadTool().ExecuteAsync(In(new { path }), context);
+
+        Assert.False(result.IsError, result.Output);
+        Assert.NotNull(result.Image);
+        Assert.Equal("image/png", result.Image!.Source.MediaType);
+        Assert.Equal(Convert.ToBase64String([0x89, 0x50, 0x4e, 0x47]), result.Image.Source.Data);
+    }
+
+    [Fact]
+    public async Task FileRead_RejectsImageForTextOnlyModel()
+    {
+        var path = Path.Combine(_dir, "probe.png");
+        await File.WriteAllBytesAsync(path, [0x89, 0x50, 0x4e, 0x47]);
+        var context = Ctx() with { Provider = "ollama", Model = "llama3.1" };
+
+        var result = await new FileReadTool().ExecuteAsync(In(new { path }), context);
+
+        Assert.True(result.IsError);
+        Assert.Contains("cannot read images", result.Output);
+        Assert.Null(result.Image);
+    }
+
+    [Fact]
     public async Task FileEdit_ReplaceAll_CrLf_AndHints()
     {
         var path = Path.Combine(_dir, "f.cs");

@@ -17,6 +17,39 @@ public class SessionManagerTests
     }
 
     [Fact]
+    public async Task RichUserMessage_RoundTripsImageContent()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var mgr = new SessionManager(dir);
+            var config = await mgr.CreateAsync(new SessionConfig
+            {
+                Id = "image-roundtrip",
+                CreatedAt = DateTime.UtcNow.ToString("o")
+            });
+            await mgr.LogUserMessageAsync(config, new Message
+            {
+                Role = MessageRole.User,
+                Content =
+                [
+                    new TextContent { Text = "inspect" },
+                    new ImageContent { Source = new ImageSource { SourceType = "base64", MediaType = "image/png", Data = "aGVsbG8=" } }
+                ]
+            });
+
+            var resumed = await mgr.ResumeAsync(config.Id);
+            Assert.Equal("inspect", resumed.Messages[0].GetTextContent());
+            var image = Assert.IsType<ImageContent>(resumed.Messages[0].Content[1]);
+            Assert.Equal("aGVsbG8=", image.Source.Data);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task CreateAsync_WritesSessionStartEvent()
     {
         var dir = CreateTempDir();

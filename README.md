@@ -54,6 +54,9 @@ dotnet run --project src/Solvra -- chat
 --effort         Effort level: low, medium, high, max
 --auto           Auto-approve all tool permissions
 --plan           Plan mode: only read-only tools run; the agent describes its changes
+--ask-all        Ask before writes, web access, commands, code, agents and other non-local reads
+--no-tools       Generation-only mode: no tools, hooks, skills, memory or instruction files
+--ephemeral      Don't persist a conversation transcript
 --json           Output result as JSON (text, stop_reason, error, session_id, usage)
 --system         System prompt (replaces the default coding instructions)
 --session <id>   Continue (or create) a named session
@@ -70,6 +73,19 @@ dotnet run --project src/Solvra -- chat
 `solvra chat` supports `/model`, `/mode ask|auto|plan`, `/clear`, `/compact`, `/cost`, `/session`,
 `/tools`. Ctrl+C interrupts the running turn. End a line with `\` to continue it, or wrap a
 multi-line message in lines of `"""`.
+
+For UI integrations, `solvra chat --ndjson` accepts native inline screenshots:
+
+```json
+{"t":"send","text":"What is wrong here?","images":[{"mime":"image/png","data":"<base64>"}]}
+```
+
+PNG, JPEG and WebP inputs are accepted, up to four images and 20 MiB each. Use
+`--no-tools --ephemeral` for an isolated quick answer. `solvra models --json` returns model objects
+with `id`, `label` and `vision`; image input to a text-only model returns `unsupported_input` before
+the turn starts. `ready`/`start` identify the resolved model and `turn_end` includes status, model and usage.
+Inline-image turns are generation-only so text embedded in an image cannot trigger tools; clients can send a
+follow-up text-only turn when the user explicitly wants Solvra to act on the analysis.
 
 ### Project instructions
 
@@ -154,6 +170,7 @@ Program.cs (CLI)
   to ask (no terminal), they are refused rather than silently allowed.
 - **Auto** — Allow all (for headless/CI)
 - **Plan** — Read-only: Write/Execute/Agent tools are refused and the agent describes its plan
+- **AskAll** (`--ask-all`) — only `file_read`, `glob` and `grep` run directly; every other tool asks
 
 Subagents inherit the parent's mode, approval prompt, working directory and tool lists; nesting
 is capped at 2 levels.

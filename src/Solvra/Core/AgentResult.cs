@@ -14,6 +14,8 @@ public enum StopReason
 public record AgentRunOptions
 {
     public required string Prompt { get; init; }
+    /// <summary>Optional rich user message. When set, it replaces the text-only Prompt message.</summary>
+    public Message? UserMessage { get; init; }
     public required SessionConfig Session { get; init; }
     public string? SystemPrompt { get; init; }
     public IReadOnlyList<Message>? History { get; init; }
@@ -38,6 +40,9 @@ public record AgentRunOptions
 
     /// <summary>Write the prompt, assistant turns and tool results to the session file.</summary>
     public bool LogToSession { get; init; } = true;
+
+    /// <summary>Generation-only mode: omit tool definitions, hooks, skills, memory and project instructions.</summary>
+    public bool NoTools { get; init; }
 }
 
 public record AgentRunResult

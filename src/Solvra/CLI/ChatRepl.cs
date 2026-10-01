@@ -22,14 +22,19 @@ public sealed class ChatRepl
     private decimal _costUsd;
     private TokenUsage _usage = new();
     private CancellationTokenSource? _turnCts;
+    private readonly bool _noTools;
+    private readonly bool _ephemeral;
 
-    public ChatRepl(AgentSubsystems subsystems, SessionConfig session, List<Message> history, bool auto)
+    public ChatRepl(AgentSubsystems subsystems, SessionConfig session, List<Message> history, bool auto,
+        bool noTools = false, bool ephemeral = false)
     {
         _s = subsystems;
         _reflection = subsystems.CreateReflection();
         _session = session;
         _history = history;
         _auto = auto || session.PermissionMode == "auto";
+        _noTools = noTools;
+        _ephemeral = ephemeral;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -122,6 +127,7 @@ public sealed class ChatRepl
                 Console.WriteLine($"Exchanges: {_history.Count(m => m.Role == MessageRole.User && m.Content.Any(c => c is TextContent))}");
                 return true;
             case "/tools":
+                if (_noTools) { Console.WriteLine("Tools are disabled for this chat."); return true; }
                 foreach (var tool in _s.Registry.GetToolDefinitions())
                     Console.WriteLine($"  {tool.Name}: {tool.Description}");
                 return true;
@@ -176,6 +182,8 @@ public sealed class ChatRepl
                 Streaming = true,
                 OnText = text => { streamed.Append(text); Console.Write(text); },
                 OnPermissionRequest = _auto ? null : AgentHost.AskOnConsole,
+                LogToSession = !_ephemeral,
+                NoTools = _noTools,
             }, _turnCts.Token);
 
             _history = [.. result.Messages];

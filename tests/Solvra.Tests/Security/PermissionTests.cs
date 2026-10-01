@@ -109,4 +109,23 @@ public class PermissionTests
         var result = await _checker.CheckPermissionAsync(tool, PermissionMode.Default, _ => Task.FromResult(false));
         Assert.False(result);
     }
+
+    [Theory]
+    [InlineData("file_read", PermissionLevel.Read, false)]
+    [InlineData("glob", PermissionLevel.Read, false)]
+    [InlineData("web_fetch", PermissionLevel.Network, true)]
+    [InlineData("file_write", PermissionLevel.Write, true)]
+    [InlineData("bash", PermissionLevel.Execute, true)]
+    public async Task AskAllOnlySkipsPromptForLocalReads(string name, PermissionLevel level, bool shouldPrompt)
+    {
+        var prompted = false;
+        var tool = new FakeTool { Name = name, PermissionLevel = level };
+        var allowed = await _checker.CheckPermissionAsync(tool, PermissionMode.AskAll, _ =>
+        {
+            prompted = true;
+            return Task.FromResult(true);
+        });
+        Assert.True(allowed);
+        Assert.Equal(shouldPrompt, prompted);
+    }
 }

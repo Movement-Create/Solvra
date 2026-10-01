@@ -65,13 +65,16 @@ public static class Program
         var cwdOption = new Option<string?>("--cwd", "Working directory for tools and project instructions");
         var reflectOption = new Option<bool?>("--reflect", "Run the post-task lesson-saving pass (default: config 'reflection')");
         var noSessionOption = new Option<bool>("--no-session", "Do not write a session file");
+        var ephemeralOption = new Option<bool>("--ephemeral", "Do not persist a transcript");
+        var noToolsOption = new Option<bool>("--no-tools", "Generation-only mode without tools, hooks, skills, memory or project instructions");
+        var askAllOption = new Option<bool>("--ask-all", "Ask before every action except local workspace reads");
         var timeLimitOption = new Option<int?>("--time-limit-seconds", "Hard elapsed-time limit for this run (tools and subagents inherit it)");
 
         // --- solvra run <prompt> ---
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, timeLimitOption })
+                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -81,6 +84,8 @@ public static class Program
             var outputJson = p.GetValueForOption(jsonOption);
             var auto = p.GetValueForOption(autoOption);
             var plan = p.GetValueForOption(planOption);
+            var askAll = p.GetValueForOption(askAllOption);
+            var ephemeral = p.GetValueForOption(ephemeralOption) || p.GetValueForOption(noSessionOption);
             var ct = context.GetCancellationToken();
 
             if (prompt == "-") prompt = await Console.In.ReadToEndAsync(ct);
@@ -100,7 +105,7 @@ public static class Program
                 Title = prompt.Length > 80 ? prompt[..80] : prompt,
                 Model = model,
                 Provider = provider,
-                PermissionMode = plan ? "plan" : (auto ? "auto" : config.PermissionMode),
+                PermissionMode = plan ? "plan" : (auto ? "auto" : askAll ? "askall" : config.PermissionMode),
                 Effort = effort,
                 MaxTurns = p.GetValueForOption(maxTurnsOption) ?? config.MaxTurns,
                 MaxBudgetUsd = p.GetValueForOption(maxBudgetOption) ?? config.MaxBudgetUsd,
@@ -129,13 +134,16 @@ public static class Program
                 }
                 catch (FileNotFoundException)
                 {
-                    sessionConfig = await sessionMgr.CreateAsync(sessionConfig with { Id = sessionId });
+                    sessionConfig = ephemeral
+                        ? sessionConfig with { Id = sessionId }
+                        : await sessionMgr.CreateAsync(sessionConfig with { Id = sessionId });
                 }
             }
-            else if (!p.GetValueForOption(noSessionOption))
+            else if (!ephemeral)
             {
                 sessionConfig = await sessionMgr.CreateAsync(sessionConfig);
             }
+            if (ephemeral) sessionConfig = sessionConfig with { FilePath = "" };
 
             var canPrompt = !Console.IsInputRedirected && prompt != "-";
             if (!auto && !plan && !canPrompt && config.PermissionMode is not ("auto" or "bypasspermissions"))
@@ -153,9 +161,11 @@ public static class Program
                 TimeLimit = p.GetValueForOption(timeLimitOption) is > 0 and var seconds
                     ? TimeSpan.FromSeconds(seconds)
                     : null,
+                LogToSession = !ephemeral,
+                NoTools = p.GetValueForOption(noToolsOption),
             }, ct);
 
-            await sessionMgr.LogResultAsync(sessionConfig, result);
+            if (!ephemeral) await sessionMgr.LogResultAsync(sessionConfig, result);
 
             if (outputJson)
             {
@@ -193,7 +203,7 @@ public static class Program
 
         // --- solvra chat ---
         var chatCommand = new Command("chat", "Interactive chat REPL");
-        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, systemOption, cwdOption, reflectOption })
+        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, askAllOption, noToolsOption, ephemeralOption, systemOption, cwdOption, reflectOption })
             chatCommand.AddOption(o);
         var chatBudgetOption = new Option<decimal?>("--max-budget", "Max estimated USD per turn (0 = no limit)");
         chatCommand.AddOption(chatBudgetOption);
@@ -209,6 +219,9 @@ public static class Program
             var model = p.GetValueForOption(modelOption);
             var auto = p.GetValueForOption(autoOption);
             var plan = p.GetValueForOption(planOption);
+            var askAll = p.GetValueForOption(askAllOption);
+            var noTools = p.GetValueForOption(noToolsOption);
+            var ephemeral = p.GetValueForOption(ephemeralOption);
             var resume = p.GetValueForOption(resumeOption);
             var ndjson = p.GetValueForOption(ndjsonOption);
             var ct = context.GetCancellationToken();
@@ -223,7 +236,7 @@ public static class Program
 
             var history = new List<Message>();
             SessionConfig sessionConfig;
-            var mode = plan ? "plan" : (auto ? "auto" : config.PermissionMode);
+            var mode = plan ? "plan" : (auto ? "auto" : askAll ? "askall" : config.PermissionMode);
 
             if (!string.IsNullOrEmpty(resume))
             {
@@ -251,7 +264,7 @@ public static class Program
             else
             {
                 var (chatProvider, chatModel) = AgentHost.ResolveTarget(config, provider, model, effort);
-                sessionConfig = await sessionMgr.CreateAsync(new SessionConfig
+                sessionConfig = new SessionConfig
                 {
                     Id = Guid.NewGuid().ToString(),
                     CreatedAt = DateTime.UtcNow.ToString("o"),
@@ -265,16 +278,18 @@ public static class Program
                     SystemPrompt = p.GetValueForOption(systemOption) ?? config.SystemPrompt,
                     AllowedTools = config.AllowedTools,
                     DisallowedTools = config.DisallowedTools,
-                });
+                };
+                if (!ephemeral) sessionConfig = await sessionMgr.CreateAsync(sessionConfig);
             }
+            if (ephemeral) sessionConfig = sessionConfig with { FilePath = "" };
 
             if (ndjson)
             {
-                await NdjsonChat.RunAsync(s.CreateReflection(), sessionMgr, sessionConfig, history, auto, !string.IsNullOrEmpty(resume), ct);
+                await NdjsonChat.RunAsync(s.CreateReflection(), sessionMgr, sessionConfig, history, auto, !string.IsNullOrEmpty(resume), noTools, ephemeral, ct);
                 return;
             }
 
-            await new ChatRepl(s, sessionConfig, history, auto).RunAsync(ct);
+            await new ChatRepl(s, sessionConfig, history, auto, noTools, ephemeral).RunAsync(ct);
         });
 
         // --- solvra models ---
@@ -295,7 +310,15 @@ public static class Program
                 var providerId = providerFilter ?? config.Provider;
                 var prov = router.GetProvider(providerId);
                 var models = await prov.ListModelsAsync(context.GetCancellationToken());
-                var json = JsonSerializer.Serialize(new { provider = providerId, defaultModel = providerFilter == null || providerFilter == config.Provider ? config.Model : null, models },
+                var descriptors = models.Select(m =>
+                {
+                    var descriptor = ModelCapabilities.Describe(providerId, m);
+                    return descriptor with { Id = $"{providerId}:{descriptor.Id}" };
+                });
+                var defaultModel = providerFilter == null || providerFilter == config.Provider
+                    ? (config.Model.StartsWith(providerId + ":", StringComparison.OrdinalIgnoreCase) ? config.Model : $"{providerId}:{config.Model}")
+                    : null;
+                var json = JsonSerializer.Serialize(new { provider = providerId, defaultModel, models = descriptors },
                     new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
                 Console.WriteLine(json);
                 return;

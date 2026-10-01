@@ -36,7 +36,7 @@ public sealed class Reflection
 
         var result = await _agentLoop.RunAsync(options, ct);
 
-        if (!_enabled || !ShouldReflect(result))
+        if (options.NoTools || !_enabled || !ShouldReflect(result))
             return result;
 
         AgentRunResult reflectionResult;
@@ -58,7 +58,8 @@ public sealed class Reflection
                 Deadline = options.Deadline,
                 ProcessTracker = options.ProcessTracker,
                 Cwd = options.Cwd,
-                LogToSession = false
+                LogToSession = false,
+                NoTools = options.NoTools
             }, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

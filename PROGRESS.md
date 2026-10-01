@@ -1,5 +1,25 @@
 # Solvra harness fixes — progress
 
+## Lint screenshot integration — 2026-10-01
+
+Worktree: `/home/cosmos/wt/github/Solvra/lint-integration`, branch `feature/lint-integration`, based
+on `origin/main` at `fe99c81`.
+
+Implemented the `SOLVRA-REQUESTS.md` contract: validated NDJSON inline PNG/JPEG/WebP input (four
+images, 20 MiB each), native provider image blocks including Gemini, conservative model vision
+metadata, rejection before turn start for text-only models, and image-file fallback for
+PNG/JPEG/WebP/GIF. Added `--ask-all`, `--no-tools`, and `--ephemeral`; generation-only mode omits tool
+definitions, hooks, reflection, skills, memory and instruction files. Protocol events now expose the
+resolved model, usage, terminal status and error codes. Rich image messages round-trip in sessions.
+Inline-image turns are always generation-only, preventing image prompt injection from producing tool calls;
+an explicit follow-up text turn retains the normal tool-enabled workflow.
+
+Verification so far: 361/361 .NET tests; visual probe correctly described by `gpt-5.6-luna` in one
+tool-free turn; text-only `llama3.1` rejected with `unsupported_input` and no `start`; strict writes
+and web fetches emitted permission before acting and denial prevented action; prompt-injection text
+inside an image was treated as untrusted content with zero tool events. The verified change is ready
+for an atomic production release; deployment state is recorded in the task handoff and release marker.
+
 ## Post-fix evaluation — 2026-10-01
 
 Worktree: `/home/cosmos/wt/github/Solvra/postfix-eval`, branch `eval/postfix-20261001`, based on

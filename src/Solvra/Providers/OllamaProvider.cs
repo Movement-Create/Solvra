@@ -144,7 +144,7 @@ public sealed class OllamaProvider : IProvider
 
     public decimal EstimateCost(string model, int inputTokens, int outputTokens) => 0m;
 
-    private JsonObject BuildRequest(CompletionOptions options, bool stream)
+    internal JsonObject BuildRequest(CompletionOptions options, bool stream)
     {
         var messages = new JsonArray();
 
@@ -202,11 +202,19 @@ public sealed class OllamaProvider : IProvider
             }
 
             var text = ExtractText(msg);
-            messages.Add(new JsonObject
+            var userMessage = new JsonObject
             {
                 ["role"] = msg.Role.ToWireString(),
                 ["content"] = text
-            });
+            };
+            var images = new JsonArray();
+            foreach (var image in msg.Content.OfType<ImageContent>())
+            {
+                if (image.Source.SourceType == "base64" && !string.IsNullOrEmpty(image.Source.Data))
+                    images.Add(image.Source.Data);
+            }
+            if (images.Count > 0) userMessage["images"] = images;
+            messages.Add(userMessage);
         }
 
         var request = new JsonObject
