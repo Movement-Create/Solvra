@@ -1,5 +1,25 @@
 # Solvra harness fixes — progress
 
+## Post-fix evaluation — 2026-10-01
+
+Worktree: `/home/cosmos/wt/github/Solvra/postfix-eval`, branch `eval/postfix-20261001`, based on
+and evaluating deployed `origin/main` revision `98a172d`.
+
+Fresh results: 338/338 .NET tests, 2/2 Harbor adapter tests, four regression definitions valid, and
+the no-op control failed 16/16 as required. `openai:glm-5.3-flash` passed 15/16 live scenarios; its
+one failure returned a nested defaults dictionary by reference. `chatgpt:gpt-5.6-sol` passed all six
+hard cases, including that failed cheap-model case. A live 15-second deadline probe interrupted active
+`code_run`, exited 4 after 15.4 seconds, preserved 3,081 input/237 output tokens in JSON and audit
+telemetry, and left no child process.
+
+The eval runner had drifted from the production audit schema. It now recognizes current
+`tool_call_completed` events as well as legacy `ToolExecution`, counts lifecycle actions once, supplies
+an 840-second internal deadline under its 900-second process guard, and keeps empty TSV fields aligned.
+
+Report: `reports/post-fix-evaluation-2026-10-01.md`. Raw artifacts:
+`/data/solvra-evals/postfix-20261001/`. No production source, live configuration, deployment, service,
+Docker image, or other worktree was changed by the evaluation.
+
 ## Deadline, telemetry, and verification regressions — 2026-10-01
 
 Worktree: `/home/cosmos/wt/github/Solvra/deadline-verification`, branch

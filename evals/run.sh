@@ -7,7 +7,8 @@
 #   check.sh     hidden verification, run after the agent (never visible to it)
 #   setup.sh     optional, generates large fixtures into $WORK
 #   flags        optional extra solvra flags (--no-auto disables the default --auto)
-# Env: SOLVRA_BIN (default ~/.local/bin/solvra), MAX_TURNS (default 40).
+# Env: SOLVRA_BIN (default ~/.local/bin/solvra), MAX_TURNS (default 40),
+#      TIME_LIMIT_SECONDS (default 840; set to 0 to disable the internal limit).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODEL="chatgpt:gpt-5.6-luna"; JOBS=3; OUTDIR=""
@@ -18,6 +19,7 @@ shift $((OPTIND - 1))
 OUTDIR=${OUTDIR:-/tmp/solvra-evals/$(date +%Y%m%d-%H%M%S)-${MODEL//[:\/]/_}}
 SOLVRA_BIN=${SOLVRA_BIN:-$HOME/.local/bin/solvra}
 MAX_TURNS=${MAX_TURNS:-40}
+TIME_LIMIT_SECONDS=${TIME_LIMIT_SECONDS:-840}
 mkdir -p "$OUTDIR"
 
 cases=()
@@ -48,8 +50,10 @@ run_case() {
     local sflags="${step%%:::*}" prompt="${step#*:::}"
     echo "=== step $i ===" >> "$R/out.txt"
     # shellcheck disable=SC2086
+    local deadline_flags=""
+    [ "$TIME_LIMIT_SECONDS" -gt 0 ] && deadline_flags="--time-limit-seconds $TIME_LIMIT_SECONDS"
     SOLVRA_HOME="$HOME_DIR" NO_COLOR=1 timeout 900 "$SOLVRA_BIN" run "$prompt" -m "$MODEL" --summary \
-      --max-turns "$MAX_TURNS" --cwd "$WORK" $base_flags $sflags < /dev/null >> "$R/out.txt" 2>> "$R/err.txt" || rc=$?
+      --max-turns "$MAX_TURNS" --cwd "$WORK" $deadline_flags $base_flags $sflags < /dev/null >> "$R/out.txt" 2>> "$R/err.txt" || rc=$?
   done
   local secs=$(( $(date +%s) - start ))
 
@@ -67,7 +71,10 @@ for f in glob.glob(f"{home}/logs/audit-*.jsonl"):
         try: e = json.loads(line)
         except ValueError: continue
         d = e.get("data") or {}
-        if e.get("event_type") == "ToolExecution" and d.get("toolName") == name and (mode == "used" or d.get("isError")):
+        event = e.get("event_type")
+        tool = d.get("tool") if event in ("tool_call_completed", "tool_execution_metrics") else d.get("toolName")
+        is_error = d.get("is_error") if event in ("tool_call_completed", "tool_execution_metrics") else d.get("isError")
+        if event in ("ToolExecution", "tool_call_completed") and tool == name and (mode == "used" or is_error):
             sys.exit(0)
 sys.exit(1)
 PY
@@ -88,14 +95,17 @@ for f in glob.glob(f"{sys.argv[1]}/logs/audit-*.jsonl"):
     for line in open(f):
         try: e = json.loads(line)
         except ValueError: continue
-        if e.get("event_type") == "ToolExecution": c[(e.get("data") or {}).get("toolName")] += 1
+        event = e.get("event_type")
+        data = e.get("data") or {}
+        if event == "tool_call_completed": c[data.get("tool")] += 1
+        elif event == "ToolExecution": c[data.get("toolName")] += 1
 print(" ".join(f"{k}×{v}" for k, v in c.most_common()))
 PY
 )
   turns=$(grep -oP '^Turns: \K\d+' "$R/out.txt" | paste -sd+ | bc 2>/dev/null)
   tokens=$(grep -oP '^Tokens: \K\d+' "$R/out.txt" | paste -sd+ | bc 2>/dev/null)
   local reason; reason=$(grep "^FAIL:" "$R/check.txt" | head -1 | cut -c7-120)
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$rc" "$secs" "${turns:-?}" "${tokens:-?}" "$used" "$reason" > "$R/row.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$rc" "$secs" "${turns:-?}" "${tokens:-?}" "${used:--}" "${reason:--}" > "$R/row.tsv"
   echo "[$status] $name (${secs}s, turns ${turns:-?}) ${reason}"
 }
 
