@@ -14,12 +14,13 @@ public sealed class OllamaProvider : IProvider
     public string Id => "ollama";
     public string DisplayName => "Ollama (Local)";
 
-    public OllamaProvider(HttpClient? http = null, string? baseUrl = null)
+    public OllamaProvider(HttpClient? http = null, string? baseUrl = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
         _baseUrl = baseUrl
             ?? Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
             ?? "http://localhost:11434";
-        _http = http ?? new HttpClient();
+        _http = http ?? ProviderHttpClient.Create(timeoutSeconds);
     }
 
     public async Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)

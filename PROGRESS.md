@@ -1,5 +1,29 @@
 # Solvra harness fixes — progress
 
+## Configurable model request timeout — 2026-10-01
+
+Worktree: `/home/cosmos/wt/github/Solvra/provider-timeouts`, branch `provider-timeouts`, based on
+`origin/main` at `790ceb9`.
+
+Confirmed that provider clients (except the newer ChatGPT provider) inherited .NET's implicit
+100-second `HttpClient.Timeout`, independent of Solvra's run deadline. Added one provider-client
+timeout setting with a 600-second default, `0` for no per-request cap, a one-day validation ceiling,
+and propagation to Anthropic, OpenAI-compatible, Google, Ollama, Moonshot, and ChatGPT providers.
+Configuration is available through `model_timeout_seconds`, `SOLVRA_MODEL_TIMEOUT_SECONDS`, and
+`--model-timeout-seconds` on `run`/`chat`. The Harbor adapter passes `0`, leaving its explicit
+task-specific `--time-limit-seconds` as the sole deadline.
+
+Reproduced the DeepSeek failure against the deployed OpenCode Go gateway: HTTP 400 says DeepSeek
+requires Global regions in workspace Privacy settings. This is an external account policy gate, so
+the implementation documents the setting/alternate-provider remedy and deliberately does not retry
+or silently substitute a model.
+
+Verification: 367/367 .NET tests and 3/3 Harbor adapter tests pass. CLI help exposes both timeout
+controls, and an invalid model timeout exits 1 with a clear validation error before making a request.
+Final diff and whitespace review pass. The user authorized commit, push, and deployment after this
+acceptance checkpoint; final release state is recorded in the task handoff. Workspace privacy and
+secrets are unchanged.
+
 ## Lint screenshot integration — 2026-10-01
 
 Worktree: `/home/cosmos/wt/github/Solvra/lint-integration`, branch `feature/lint-integration`, based

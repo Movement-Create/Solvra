@@ -63,6 +63,7 @@ dotnet run --project src/Solvra -- chat
 --no-session     Don't write a session file
 --cwd <dir>      Working directory for tools and project instructions
 --max-budget     Max estimated USD per run (0 = no limit; unknown/subscription models cost 0)
+--model-timeout-seconds  Max time for one model request (default 600; 0 disables it)
 --reflect        Run the post-task lesson-saving pass (off by default)
 ```
 
@@ -101,6 +102,16 @@ directory (and `~/.config/solvra/SOLVRA.md` for user-wide rules).
 | OpenAI (and OpenAI-compatible gateways via `OPENAI_BASE_URL`) | gpt-4.1, o3, any gateway model | `OPENAI_API_KEY` |
 | Google | gemini-2.5-pro, gemini-2.5-flash | `GOOGLE_API_KEY` |
 | Ollama | llama3.1, llama3.2, any local model | (local, no key needed) |
+
+Model requests default to a 600-second timeout instead of .NET's implicit 100-second limit. Set
+`model_timeout_seconds` in `solvra.json5`, `SOLVRA_MODEL_TIMEOUT_SECONDS`, or
+`--model-timeout-seconds` for `run`/`chat`; use `0` to rely only on caller cancellation and the
+run-level `--time-limit-seconds` deadline.
+
+OpenCode Go may reject DeepSeek with “requires Global regions”. That is a gateway workspace privacy
+policy, not a retryable Solvra error: select **Global** in the OpenCode workspace Privacy settings,
+or choose a model/provider available under the workspace's current region. Solvra does not silently
+substitute another model when an explicitly selected model is rejected.
 
 ## Built-in Tools
 

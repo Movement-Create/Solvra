@@ -25,10 +25,11 @@ public sealed class MoonshotProvider : IProvider
 
     private static readonly (decimal Input, decimal Output) DefaultPricing = (2m, 4m);
 
-    public MoonshotProvider(HttpClient? http = null, string? apiKey = null)
+    public MoonshotProvider(HttpClient? http = null, string? apiKey = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
         var key = apiKey ?? Environment.GetEnvironmentVariable("MOONSHOT_API_KEY") ?? "";
-        _inner = new OpenAiProvider(http, key, "https://api.moonshot.ai/v1");
+        _inner = new OpenAiProvider(http, key, "https://api.moonshot.ai/v1", timeoutSeconds);
     }
 
     public Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)

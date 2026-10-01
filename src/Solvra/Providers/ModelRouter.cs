@@ -52,18 +52,25 @@ public sealed class ModelRouter
 
     private static readonly string[] AutoSelectOrder = ["anthropic", "openai", "google", "ollama"];
 
-    public ModelRouter(Dictionary<string, Func<IProvider>>? providerFactories = null)
+    public ModelRouter(int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
-        _providerFactories = providerFactories ?? new Dictionary<string, Func<IProvider>>
-        {
-            ["anthropic"] = () => new AnthropicProvider(),
-            ["openai"] = () => new OpenAiProvider(),
-            ["google"] = () => new GoogleProvider(),
-            ["ollama"] = () => new OllamaProvider(),
-            ["moonshot"] = () => new MoonshotProvider(),
-            ["chatgpt"] = () => new ChatGptProvider(),
-        };
+        _providerFactories = CreateDefaultFactories(timeoutSeconds);
     }
+
+    public ModelRouter(Dictionary<string, Func<IProvider>>? providerFactories)
+    {
+        _providerFactories = providerFactories ?? CreateDefaultFactories(ProviderHttpClient.DefaultTimeoutSeconds);
+    }
+
+    private static Dictionary<string, Func<IProvider>> CreateDefaultFactories(int timeoutSeconds) => new()
+    {
+        ["anthropic"] = () => new AnthropicProvider(timeoutSeconds: timeoutSeconds),
+        ["openai"] = () => new OpenAiProvider(timeoutSeconds: timeoutSeconds),
+        ["google"] = () => new GoogleProvider(timeoutSeconds: timeoutSeconds),
+        ["ollama"] = () => new OllamaProvider(timeoutSeconds: timeoutSeconds),
+        ["moonshot"] = () => new MoonshotProvider(timeoutSeconds: timeoutSeconds),
+        ["chatgpt"] = () => new ChatGptProvider(timeoutSeconds: timeoutSeconds),
+    };
 
     public IProvider GetProvider(string providerId)
     {

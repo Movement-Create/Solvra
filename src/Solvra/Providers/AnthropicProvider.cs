@@ -36,10 +36,11 @@ public sealed class AnthropicProvider : IProvider
     public string Id => "anthropic";
     public string DisplayName => "Anthropic";
 
-    public AnthropicProvider(HttpClient? http = null, string? apiKey = null)
+    public AnthropicProvider(HttpClient? http = null, string? apiKey = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? "";
-        _http = http ?? new HttpClient();
+        _http = http ?? ProviderHttpClient.Create(timeoutSeconds);
     }
 
     public async Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)

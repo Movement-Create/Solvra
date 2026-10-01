@@ -11,6 +11,13 @@ from solvra_harbor_agent import Solvra
 
 
 class AdapterTelemetryTests(unittest.TestCase):
+    def test_run_uses_task_deadline_without_a_shorter_model_timeout(self) -> None:
+        agent = Solvra(logs_dir=Path("/tmp/unused"), model_name="chatgpt/gpt-5.6-sol")
+        command = agent._run_command("chatgpt:gpt-5.6-sol", "/tmp/instruction", "/tmp/output", 895)
+
+        self.assertIn("--model-timeout-seconds 0", command)
+        self.assertIn("--time-limit-seconds 895", command)
+
     def test_partial_audit_usage_survives_missing_final_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

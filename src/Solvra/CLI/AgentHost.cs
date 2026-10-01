@@ -36,7 +36,7 @@ public static class AgentHost
 {
     public static AgentSubsystems Build(SolvraConfig config)
     {
-        var router = new ModelRouter();
+        var router = new ModelRouter(config.ModelTimeoutSeconds);
         var auditLogger = new AuditLogger(SolvraPaths.LogsDir);
         var sandbox = new SandboxManager(new SandboxConfig());
         var registry = new ToolRegistry(auditLogger);

@@ -126,6 +126,9 @@ public static partial class ConfigLoader
             if (json.TryGetProperty("max_tokens", out var maxTokProp) && maxTokProp.ValueKind == JsonValueKind.Number)
                 result = result with { MaxTokens = maxTokProp.GetInt32() };
 
+            if (json.TryGetProperty("model_timeout_seconds", out var modelTimeoutProp) && modelTimeoutProp.ValueKind == JsonValueKind.Number)
+                result = result with { ModelTimeoutSeconds = modelTimeoutProp.GetInt32() };
+
             if (json.TryGetProperty("hooks", out var hooksProp) && hooksProp.ValueKind == JsonValueKind.Object)
             {
                 static List<string> Commands(JsonElement obj, string name) =>
@@ -194,6 +197,7 @@ public static partial class ConfigLoader
         var memoryDir = Environment.GetEnvironmentVariable("SOLVRA_MEMORY_DIR");
         var reflection = Environment.GetEnvironmentVariable("SOLVRA_REFLECTION");
         var maxTokens = Environment.GetEnvironmentVariable("SOLVRA_MAX_TOKENS");
+        var modelTimeout = Environment.GetEnvironmentVariable("SOLVRA_MODEL_TIMEOUT_SECONDS");
 
         return config with
         {
@@ -205,6 +209,7 @@ public static partial class ConfigLoader
             MaxBudgetUsd = decimal.TryParse(maxBudget, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : config.MaxBudgetUsd,
             Reflection = reflection is "1" or "true" ? true : reflection is "0" or "false" ? false : config.Reflection,
             MaxTokens = int.TryParse(maxTokens, out var mtk) && mtk > 0 ? mtk : config.MaxTokens,
+            ModelTimeoutSeconds = int.TryParse(modelTimeout, out var mts) && mts >= 0 ? mts : config.ModelTimeoutSeconds,
             PermissionMode = !string.IsNullOrEmpty(permMode) ? permMode : config.PermissionMode,
             SystemPrompt = !string.IsNullOrEmpty(sysPrompt) ? sysPrompt : config.SystemPrompt,
             SessionsDir = !string.IsNullOrEmpty(sessionsDir) ? sessionsDir : config.SessionsDir,

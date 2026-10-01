@@ -74,6 +74,13 @@ public record SolvraConfig
     [JsonPropertyName("max_tokens")]
     public int MaxTokens { get; init; } = 8192;
 
+    /// <summary>
+    /// Maximum wall time for one model HTTP request. Zero disables the per-request limit;
+    /// caller cancellation and the run deadline still apply.
+    /// </summary>
+    [JsonPropertyName("model_timeout_seconds")]
+    public int ModelTimeoutSeconds { get; init; } = 600;
+
     public EffortLevel ParsedEffort => EffortLevelExtensions.Parse(Effort);
 }
 

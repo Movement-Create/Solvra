@@ -31,10 +31,11 @@ public sealed class GoogleProvider : IProvider
     public string Id => "google";
     public string DisplayName => "Google Gemini";
 
-    public GoogleProvider(HttpClient? http = null, string? apiKey = null)
+    public GoogleProvider(HttpClient? http = null, string? apiKey = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("GOOGLE_API_KEY") ?? "";
-        _http = http ?? new HttpClient();
+        _http = http ?? ProviderHttpClient.Create(timeoutSeconds);
     }
 
     public async Task<LlmResponse> CompleteAsync(CompletionOptions options, CancellationToken ct = default)

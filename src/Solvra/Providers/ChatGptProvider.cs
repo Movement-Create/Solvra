@@ -27,9 +27,10 @@ public sealed class ChatGptProvider : IProvider
     public string Id => "chatgpt";
     public string DisplayName => "ChatGPT (Codex sign-in)";
 
-    public ChatGptProvider(HttpClient? http = null, ICodexAuthSource? auth = null, string? baseUrl = null)
+    public ChatGptProvider(HttpClient? http = null, ICodexAuthSource? auth = null, string? baseUrl = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
-        _http = http ?? new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        _http = http ?? ProviderHttpClient.Create(timeoutSeconds);
         _auth = auth ?? new CodexAuthSource();
         _baseUrl = (baseUrl ?? Environment.GetEnvironmentVariable("SOLVRA_CHATGPT_BASE_URL") ?? "https://chatgpt.com/backend-api/codex").TrimEnd('/');
     }

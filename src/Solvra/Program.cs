@@ -69,12 +69,13 @@ public static class Program
         var noToolsOption = new Option<bool>("--no-tools", "Generation-only mode without tools, hooks, skills, memory or project instructions");
         var askAllOption = new Option<bool>("--ask-all", "Ask before every action except local workspace reads");
         var timeLimitOption = new Option<int?>("--time-limit-seconds", "Hard elapsed-time limit for this run (tools and subagents inherit it)");
+        var modelTimeoutOption = new Option<int?>("--model-timeout-seconds", "Timeout for one model request; 0 disables it (default from config, 600)");
 
         // --- solvra run <prompt> ---
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption })
+                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -93,6 +94,7 @@ public static class Program
 
             var config = await ConfigLoader.LoadAsync();
             if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
+            if (p.GetValueForOption(modelTimeoutOption) is int modelTimeout) config = config with { ModelTimeoutSeconds = modelTimeout };
             var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
             var (provider, model) = AgentHost.ResolveTarget(config, p.GetValueForOption(providerOption), p.GetValueForOption(modelOption), effort);
 
@@ -203,7 +205,7 @@ public static class Program
 
         // --- solvra chat ---
         var chatCommand = new Command("chat", "Interactive chat REPL");
-        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, askAllOption, noToolsOption, ephemeralOption, systemOption, cwdOption, reflectOption })
+        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, askAllOption, noToolsOption, ephemeralOption, systemOption, cwdOption, reflectOption, modelTimeoutOption })
             chatCommand.AddOption(o);
         var chatBudgetOption = new Option<decimal?>("--max-budget", "Max estimated USD per turn (0 = no limit)");
         chatCommand.AddOption(chatBudgetOption);
@@ -230,6 +232,7 @@ public static class Program
 
             var config = await ConfigLoader.LoadAsync();
             if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
+            if (p.GetValueForOption(modelTimeoutOption) is int modelTimeout) config = config with { ModelTimeoutSeconds = modelTimeout };
             var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
             var s = AgentHost.Build(config);
             var sessionMgr = new SessionManager(config.SessionsDir);
@@ -302,8 +305,8 @@ public static class Program
         {
             var asJson = context.ParseResult.GetValueForOption(modelsJsonOption);
             var providerFilter = context.ParseResult.GetValueForOption(modelsProviderOption);
-            var router = new ModelRouter();
             var config = await ConfigLoader.LoadAsync();
+            var router = new ModelRouter(config.ModelTimeoutSeconds);
 
             if (asJson)
             {

@@ -94,7 +94,7 @@ class Solvra(BaseInstalledAgent):
         if time_limit_seconds > 0:
             deadline_arg = f"--time-limit-seconds {time_limit_seconds} "
         return (
-            f"{self._REMOTE_BIN_DIR}/Solvra run - --auto --no-session --json "
+            f"{self._REMOTE_BIN_DIR}/Solvra run - --auto --no-session --json --model-timeout-seconds 0 "
             f"-m {shlex.quote(solvra_model)} --max-turns {int(self.options.max_turns)} "
             f"--effort {shlex.quote(self.options.effort)} {deadline_arg}"
             f'--cwd "$PWD" < {shlex.quote(remote_instruction)} 2>&1 | tee {shlex.quote(output_path)}'

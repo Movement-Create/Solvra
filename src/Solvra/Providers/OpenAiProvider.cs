@@ -45,13 +45,14 @@ public sealed class OpenAiProvider : IProvider
     public string Id => "openai";
     public string DisplayName => "OpenAI";
 
-    public OpenAiProvider(HttpClient? http = null, string? apiKey = null, string? baseUrl = null)
+    public OpenAiProvider(HttpClient? http = null, string? apiKey = null, string? baseUrl = null,
+        int timeoutSeconds = ProviderHttpClient.DefaultTimeoutSeconds)
     {
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "";
         _baseUrl = baseUrl
             ?? Environment.GetEnvironmentVariable("OPENAI_BASE_URL")
             ?? "https://api.openai.com/v1";
-        _http = http ?? new HttpClient();
+        _http = http ?? ProviderHttpClient.Create(timeoutSeconds);
         _sessionHeader = Environment.GetEnvironmentVariable("SOLVRA_OPENCODE_SESSION")
             ?? (_baseUrl.Contains("opencode.ai", StringComparison.OrdinalIgnoreCase)
                 ? Guid.NewGuid().ToString()
