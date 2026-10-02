@@ -254,5 +254,5 @@ CLI
 - Added strict `low|medium|high|xhigh` effort parsing (`max` remains compatible), subagent `auto|off`, child model/effort defaults, and per-child effort overrides.
 - Effort is propagated to child sessions, audit/tracing, OpenAI reasoning payloads and ChatGPT Responses payloads. Disabled delegation is omitted from model tools and rejected if directly invoked.
 - `dotnet test Solvra.sln`: 374 passed, 0 failed; CLI help and invalid-value probes passed.
-- Browser automation is not applicable because no HTML, browser parsing, or JavaScript behavior changed; no browser test was run.
-- No commit, push, deployment, service change, or paid model call performed.
+- Browser gate: Playwright with Chromium 153 executed benign, malformed JSON, invalid-value, and hostile-text cases; malformed/invalid inputs were rejected without changing rendered state and hostile markup remained inert text. This is supplemental because the feature itself changes .NET CLI/config/provider paths, not browser code.
+- The implementation was committed and pushed to draft PR #2. No deployment, service change, or paid model call performed.
