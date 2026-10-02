@@ -319,7 +319,7 @@ public sealed class OpenAiProvider : IProvider
         return (inputTokens * pricing.Input + outputTokens * pricing.Output) / 1_000_000m;
     }
 
-    private JsonObject BuildRequest(CompletionOptions options)
+    internal JsonObject BuildRequest(CompletionOptions options)
     {
         var messages = new JsonArray();
 
@@ -423,6 +423,8 @@ public sealed class OpenAiProvider : IProvider
         // OpenAI reasoning models (o1/o3/o4, gpt-5) reject max_tokens and temperature.
         var reasoningModel = IsOpenAiReasoningModel(options.Model);
         request[reasoningModel ? "max_completion_tokens" : "max_tokens"] = options.MaxTokens;
+        if (reasoningModel)
+            request["reasoning_effort"] = options.Effort.ToWireString();
 
         if (options.Tools is { Count: > 0 })
         {

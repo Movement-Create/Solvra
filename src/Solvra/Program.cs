@@ -57,7 +57,28 @@ public static class Program
         var jsonOption = new Option<bool>("--json", "Output as JSON");
         var autoOption = new Option<bool>("--auto", "Auto-approve all tool permissions");
         var planOption = new Option<bool>("--plan", "Plan mode: read-only tools only");
-        var effortOption = new Option<string?>("--effort", "Effort level (low/medium/high/max)");
+        var effortOption = new Option<string?>("--effort", "Reasoning effort (low/medium/high/xhigh; max is a legacy alias)");
+        var subagentsOption = new Option<string?>("--subagents", "Subagent delegation mode (auto/off)");
+        var subagentModelOption = new Option<string?>("--subagent-model", "Default model for subagents (defaults to the current model)");
+        var subagentEffortOption = new Option<string?>("--subagent-effort", "Default subagent effort (defaults to the current effort)");
+        effortOption.AddValidator(r =>
+        {
+            var value = r.GetValueOrDefault<string?>();
+            if (value is not null && !EffortLevelExtensions.TryParse(value, out _))
+                r.ErrorMessage = $"Invalid effort '{value}'. Expected low, medium, high, or xhigh.";
+        });
+        subagentEffortOption.AddValidator(r =>
+        {
+            var value = r.GetValueOrDefault<string?>();
+            if (value is not null && !EffortLevelExtensions.TryParse(value, out _))
+                r.ErrorMessage = $"Invalid subagent effort '{value}'. Expected low, medium, high, or xhigh.";
+        });
+        subagentsOption.AddValidator(r =>
+        {
+            var value = r.GetValueOrDefault<string?>();
+            if (value is not null && value is not ("auto" or "off"))
+                r.ErrorMessage = $"Invalid subagents mode '{value}'. Expected auto or off.";
+        });
         var systemOption = new Option<string?>("--system", "System prompt (replaces the default instructions)");
         var sessionOption = new Option<string?>("--session", "Continue an existing session id (created if it does not exist)");
         var summaryOption = new Option<bool>("--summary", "Print end-of-session summary");
@@ -75,7 +96,7 @@ public static class Program
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption })
+                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -95,6 +116,7 @@ public static class Program
             var config = await ConfigLoader.LoadAsync();
             if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
             if (p.GetValueForOption(modelTimeoutOption) is int modelTimeout) config = config with { ModelTimeoutSeconds = modelTimeout };
+            config = ApplySubagentOptions(config, p.GetValueForOption(subagentsOption), p.GetValueForOption(subagentModelOption), p.GetValueForOption(subagentEffortOption));
             var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
             var (provider, model) = AgentHost.ResolveTarget(config, p.GetValueForOption(providerOption), p.GetValueForOption(modelOption), effort);
 
@@ -160,6 +182,9 @@ public static class Program
                 Streaming = !outputJson,
                 OnText = outputJson ? null : text => Console.Write(text),
                 OnPermissionRequest = auto || !canPrompt ? null : AgentHost.AskOnConsole,
+                SubagentsEnabled = config.SubagentsEnabled,
+                SubagentModel = config.SubagentModel,
+                SubagentEffort = config.ParsedSubagentEffort,
                 TimeLimit = p.GetValueForOption(timeLimitOption) is > 0 and var seconds
                     ? TimeSpan.FromSeconds(seconds)
                     : null,
@@ -181,6 +206,10 @@ public static class Program
                     session_id = string.IsNullOrEmpty(sessionConfig.FilePath) ? null : sessionConfig.Id,
                     model = sessionConfig.Model,
                     provider = sessionConfig.Provider,
+                    effort = sessionConfig.Effort.ToWireString(),
+                    subagents = config.Subagents,
+                    subagent_model = config.SubagentModel,
+                    subagent_effort = (config.ParsedSubagentEffort ?? sessionConfig.Effort).ToWireString(),
                     usage = new { input = result.Usage.InputTokens, output = result.Usage.OutputTokens }
                 }, JsonOut));
             }
@@ -192,7 +221,8 @@ public static class Program
             if (p.GetValueForOption(summaryOption))
             {
                 Console.WriteLine($"\n--- Summary ---");
-                Console.WriteLine($"Model: {sessionConfig.Model} ({sessionConfig.Provider})");
+                Console.WriteLine($"Model: {sessionConfig.Model} ({sessionConfig.Provider}), effort {sessionConfig.Effort.ToWireString()}");
+                Console.WriteLine($"Subagents: {config.Subagents}; default model {config.SubagentModel ?? "inherit"}; effort {(config.ParsedSubagentEffort?.ToWireString() ?? "inherit")}");
                 Console.WriteLine($"Turns: {result.Turns}");
                 Console.WriteLine($"Tokens: {result.Usage.InputTokens} in / {result.Usage.OutputTokens} out");
                 Console.WriteLine($"Cost: ${result.CostUsd:F4}{(result.CostUsd == 0 ? (sessionConfig.Provider == "chatgpt" ? " (covered by the ChatGPT subscription)" : " (no per-token price known for this model)") : "")}");
@@ -205,7 +235,7 @@ public static class Program
 
         // --- solvra chat ---
         var chatCommand = new Command("chat", "Interactive chat REPL");
-        foreach (var o in new Option[] { providerOption, modelOption, effortOption, maxTurnsOption, autoOption, planOption, askAllOption, noToolsOption, ephemeralOption, systemOption, cwdOption, reflectOption, modelTimeoutOption })
+        foreach (var o in new Option[] { providerOption, modelOption, effortOption, subagentsOption, subagentModelOption, subagentEffortOption, maxTurnsOption, autoOption, planOption, askAllOption, noToolsOption, ephemeralOption, systemOption, cwdOption, reflectOption, modelTimeoutOption })
             chatCommand.AddOption(o);
         var chatBudgetOption = new Option<decimal?>("--max-budget", "Max estimated USD per turn (0 = no limit)");
         chatCommand.AddOption(chatBudgetOption);
@@ -233,6 +263,7 @@ public static class Program
             var config = await ConfigLoader.LoadAsync();
             if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
             if (p.GetValueForOption(modelTimeoutOption) is int modelTimeout) config = config with { ModelTimeoutSeconds = modelTimeout };
+            config = ApplySubagentOptions(config, p.GetValueForOption(subagentsOption), p.GetValueForOption(subagentModelOption), p.GetValueForOption(subagentEffortOption));
             var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
             var s = AgentHost.Build(config);
             var sessionMgr = new SessionManager(config.SessionsDir);
@@ -380,6 +411,7 @@ public static class Program
                     CreatedAt = DateTime.UtcNow.ToString("o"),
                     Model = model,
                     Provider = ModelRouter.ChooseProvider(model, null, config.Provider, config.ProviderIsExplicit),
+                    Effort = config.ParsedEffort,
                     PermissionMode = "auto",
                     MaxTurns = config.MaxTurns,
                     MaxBudgetUsd = config.MaxBudgetUsd,
@@ -393,7 +425,10 @@ public static class Program
                 {
                     Prompt = prompt,
                     Session = session,
-                    Streaming = false
+                    Streaming = false,
+                    SubagentsEnabled = config.SubagentsEnabled,
+                    SubagentModel = config.SubagentModel,
+                    SubagentEffort = config.ParsedSubagentEffort
                 }, innerCt);
                 return (result.Text ?? "", result.Turns);
             };
@@ -647,6 +682,19 @@ public static class Program
         rootCommand.AddCommand(skillsCmd);
 
         return rootCommand;
+    }
+
+    private static SolvraConfig ApplySubagentOptions(SolvraConfig config, string? mode, string? model, string? effort)
+    {
+        var result = config with
+        {
+            Subagents = mode ?? config.Subagents,
+            SubagentModel = model ?? config.SubagentModel,
+            SubagentEffort = effort ?? config.SubagentEffort,
+        };
+        _ = result.SubagentsEnabled;
+        _ = result.ParsedSubagentEffort;
+        return result;
     }
 
     private static bool ApplyCwd(string? cwd)

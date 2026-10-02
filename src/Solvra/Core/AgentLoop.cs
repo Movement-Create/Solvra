@@ -145,7 +145,11 @@ public sealed class AgentLoop
         await _auditLogger.LogAsync("SessionStart", new { sessionId, model = resolvedModel, provider = provider.Id }, sessionId);
 
         var systemPrompt = await BuildSystemPromptAsync(options, cwd, resolvedModel, ct);
-        var tools = options.NoTools ? [] : _toolRegistry.GetToolDefinitions();
+        var tools = options.NoTools
+            ? []
+            : _toolRegistry.GetToolDefinitions()
+                .Where(t => options.SubagentsEnabled || t.Name != "agent")
+                .ToList();
         var overheadTokens = Context.EstimateTokens(systemPrompt) + Context.EstimateTokens(JsonSerializer.Serialize(tools));
 
         var turns = 0;
@@ -186,7 +190,8 @@ public sealed class AgentLoop
                 System = systemPrompt,
                 Tools = tools.Count > 0 ? tools : null,
                 MaxTokens = options.Session.MaxTokens > 0 ? options.Session.MaxTokens : 8192,
-                Stream = options.Streaming
+                Stream = options.Streaming,
+                Effort = options.Session.Effort
             };
 
             // Separate this turn's text from the previous turn's in the live output.
@@ -201,6 +206,7 @@ public sealed class AgentLoop
                 operation_id = modelCallId,
                 turn = turns,
                 model = resolvedModel,
+                effort = options.Session.Effort.ToWireString(),
                 estimated_input_tokens = Context.EstimateContextTokens(compressedMessages) + overheadTokens
             }, sessionId);
             try
@@ -208,6 +214,7 @@ public sealed class AgentLoop
                 using var llmSpan = _tracer.StartSpan("llm.call", new Dictionary<string, object>
                 {
                     ["model"] = resolvedModel,
+                    ["effort"] = options.Session.Effort.ToWireString(),
                     ["input_tokens"] = Context.EstimateContextTokens(compressedMessages) + overheadTokens
                 });
 
@@ -595,9 +602,11 @@ public sealed class AgentLoop
                     OperationId = tc.Id,
                     ProcessTracker = options.ProcessTracker,
                     SubagentDepth = options.SubagentDepth,
+                    SubagentsEnabled = options.SubagentsEnabled,
                     PermissionRequest = options.OnPermissionRequest,
-                    Model = options.Session.Model,
-                    Provider = options.Session.Provider,
+                    Model = options.SubagentModel ?? options.Session.Model,
+                    Provider = options.SubagentModel is null ? options.Session.Provider : null,
+                    Effort = options.SubagentEffort ?? options.Session.Effort,
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();

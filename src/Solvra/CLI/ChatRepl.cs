@@ -182,6 +182,9 @@ public sealed class ChatRepl
                 Streaming = true,
                 OnText = text => { streamed.Append(text); Console.Write(text); },
                 OnPermissionRequest = _auto ? null : AgentHost.AskOnConsole,
+                SubagentsEnabled = _s.Config.SubagentsEnabled,
+                SubagentModel = _s.Config.SubagentModel,
+                SubagentEffort = _s.Config.ParsedSubagentEffort,
                 LogToSession = !_ephemeral,
                 NoTools = _noTools,
             }, _turnCts.Token);

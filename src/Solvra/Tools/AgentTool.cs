@@ -1,6 +1,7 @@
 #nullable enable
 
 using System.Text.Json;
+using Solvra.Models;
 using Solvra.Security;
 
 namespace Solvra.Tools;
@@ -9,6 +10,7 @@ namespace Solvra.Tools;
 public sealed record SubagentRequest(
     string Prompt,
     string? Model,
+    EffortLevel Effort,
     string? SystemPrompt,
     int MaxTurns,
     int Depth,
@@ -40,7 +42,8 @@ public class AgentTool : ToolBase
         properties = new
         {
             prompt = new { type = "string", description = "Complete task description for the subagent" },
-            model = new { type = "string", description = "Model to use (optional, defaults to the current model)" },
+            model = new { type = "string", description = "Model to use (optional, defaults to the configured subagent model or current model)" },
+            effort = new { type = "string", @enum = new[] { "low", "medium", "high", "xhigh" }, description = "Reasoning effort (optional, defaults to the configured subagent effort or current effort)" },
             system_prompt = new { type = "string", description = "Custom system prompt (optional)" },
             max_turns = new { type = "integer", description = "Maximum turns (default 20)" }
         },
@@ -53,20 +56,27 @@ public class AgentTool : ToolBase
         if (string.IsNullOrWhiteSpace(prompt))
             return new ToolExecuteResult("Error: prompt is required", true);
 
-        if (RunAgentDelegate == null)
-            return new ToolExecuteResult("Error: agent loop not configured. Set AgentTool.RunAgentDelegate.", true);
+        if (!context.SubagentsEnabled)
+            return new ToolExecuteResult("Error: subagents are disabled for this run.", true);
 
         if (context.SubagentDepth >= MaxSubagentDepth)
             return new ToolExecuteResult($"Error: maximum subagent nesting depth ({MaxSubagentDepth}) reached. Do the work directly.", true);
 
         var model = GetOptionalString(input, "model");
+        var effortText = GetOptionalString(input, "effort");
+        if (effortText is not null && !EffortLevelExtensions.TryParse(effortText, out _))
+            return new ToolExecuteResult($"Error: invalid effort '{effortText}'. Expected low, medium, high, or xhigh.", true);
+        var effort = effortText is null ? context.Effort : EffortLevelExtensions.Parse(effortText);
         var systemPrompt = GetOptionalString(input, "system_prompt");
         var maxTurns = Math.Clamp(GetInt(input, "max_turns", 20), 1, 100);
+
+        if (RunAgentDelegate == null)
+            return new ToolExecuteResult("Error: agent loop not configured. Set AgentTool.RunAgentDelegate.", true);
 
         try
         {
             var result = await RunAgentDelegate(
-                new SubagentRequest(prompt, model, systemPrompt, maxTurns, context.SubagentDepth + 1, context), ct);
+                new SubagentRequest(prompt, model, effort, systemPrompt, maxTurns, context.SubagentDepth + 1, context), ct);
             return new ToolExecuteResult(ToolOutput.Limit(result, "agent"), false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

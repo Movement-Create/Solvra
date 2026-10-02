@@ -51,7 +51,10 @@ dotnet run --project src/Solvra -- chat
                  An explicit provider always wins over guessing from the model name.
 -m, --model      Model name; "provider:model" pins the provider (e.g. openai:qwen3.8-flash)
 --max-turns      Maximum agent turns (default: config max_turns, 50)
---effort         Effort level: low, medium, high, max
+--effort         Reasoning effort: low, medium, high, xhigh (max remains an alias)
+--subagents      Subagent delegation: auto or off
+--subagent-model Default child model (otherwise inherits the current model)
+--subagent-effort Default child effort (otherwise inherits the current effort)
 --auto           Auto-approve all tool permissions
 --plan           Plan mode: only read-only tools run; the agent describes its changes
 --ask-all        Ask before writes, web access, commands, code, agents and other non-local reads
@@ -107,6 +110,14 @@ Model requests default to a 600-second timeout instead of .NET's implicit 100-se
 `model_timeout_seconds` in `solvra.json5`, `SOLVRA_MODEL_TIMEOUT_SECONDS`, or
 `--model-timeout-seconds` for `run`/`chat`; use `0` to rely only on caller cancellation and the
 run-level `--time-limit-seconds` deadline.
+
+Effort is carried independently from model selection. OpenAI reasoning models receive
+`reasoning_effort`, and ChatGPT Responses requests receive `reasoning.effort`; other providers retain
+the selected model and use effort only for routing/default selection until their APIs expose a stable
+reasoning control. Configure delegation with `subagents`, `subagent_model`, and `subagent_effort` in
+`solvra.json5`, the corresponding `SOLVRA_SUBAGENTS`, `SOLVRA_SUBAGENT_MODEL`, and
+`SOLVRA_SUBAGENT_EFFORT` variables, or the run/chat options above. Child-request overrides remain
+subject to the parent run's permissions, nesting limit, cancellation, and deadline.
 
 OpenCode Go may reject DeepSeek with “requires Global regions”. That is a gateway workspace privacy
 policy, not a retryable Solvra error: select **Global** in the OpenCode workspace Privacy settings,

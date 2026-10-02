@@ -35,6 +35,33 @@ public class ProviderHttpClientTests
     }
 
     [Fact]
+    public void EffortParsing_IsStrictAndCompatible()
+    {
+        Assert.Equal(Solvra.Models.EffortLevel.ExtraHigh, Solvra.Models.EffortLevelExtensions.Parse("xhigh"));
+        Assert.Equal(Solvra.Models.EffortLevel.ExtraHigh, Solvra.Models.EffortLevelExtensions.Parse("max"));
+        Assert.Equal("xhigh", Solvra.Models.EffortLevelExtensions.ToWireString(Solvra.Models.EffortLevel.ExtraHigh));
+        Assert.Throws<ArgumentException>(() => Solvra.Models.EffortLevelExtensions.Parse("huge"));
+    }
+
+    [Fact]
+    public async Task ConfigFile_SetsSubagentDefaults()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"solvra-subagents-{Guid.NewGuid():N}.json");
+        await File.WriteAllTextAsync(path, """{"subagents":"off","subagent_model":"openai:gpt-4.1-mini","subagent_effort":"low"}""");
+        try
+        {
+            var config = await Solvra.Config.ConfigLoader.LoadAsync(path);
+            Assert.False(config.SubagentsEnabled);
+            Assert.Equal("openai:gpt-4.1-mini", config.SubagentModel);
+            Assert.Equal(Solvra.Models.EffortLevel.Low, config.ParsedSubagentEffort);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task ConfigFile_SetsModelTimeout()
     {
         var path = Path.Combine(Path.GetTempPath(), $"solvra-timeout-{Guid.NewGuid():N}.json");

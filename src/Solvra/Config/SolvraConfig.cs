@@ -18,6 +18,18 @@ public record SolvraConfig
     [JsonPropertyName("effort")]
     public string Effort { get; init; } = "medium";
 
+    /// <summary>Whether the agent tool is available: "auto" or "off".</summary>
+    [JsonPropertyName("subagents")]
+    public string Subagents { get; init; } = "auto";
+
+    /// <summary>Default model override for child agents; null inherits the parent model.</summary>
+    [JsonPropertyName("subagent_model")]
+    public string? SubagentModel { get; init; }
+
+    /// <summary>Default child effort; null inherits the parent effort.</summary>
+    [JsonPropertyName("subagent_effort")]
+    public string? SubagentEffort { get; init; }
+
     [JsonPropertyName("max_turns")]
     public int MaxTurns { get; init; } = 50;
 
@@ -82,6 +94,14 @@ public record SolvraConfig
     public int ModelTimeoutSeconds { get; init; } = 600;
 
     public EffortLevel ParsedEffort => EffortLevelExtensions.Parse(Effort);
+    public EffortLevel? ParsedSubagentEffort => SubagentEffort is null ? null : EffortLevelExtensions.Parse(SubagentEffort);
+
+    public bool SubagentsEnabled => Subagents.Trim().ToLowerInvariant() switch
+    {
+        "auto" => true,
+        "off" => false,
+        _ => throw new ArgumentException($"Invalid subagents mode '{Subagents}'. Expected auto or off.")
+    };
 }
 
 public record HooksConfig

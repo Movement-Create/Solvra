@@ -150,6 +150,7 @@ public sealed class ChatGptProvider : IProvider
             ["stream"] = true,
             ["tool_choice"] = "auto",
             ["parallel_tool_calls"] = true,
+            ["reasoning"] = new JsonObject { ["effort"] = options.Effort.ToWireString() },
         };
         if (options.Tools is { Count: > 0 })
         {

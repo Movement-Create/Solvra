@@ -17,6 +17,47 @@ public class VisionTests
         => Assert.Equal(expected, ModelCapabilities.SupportsVision(provider, model));
 
     [Fact]
+    public void ChatGptRequestIncludesReasoningEffort()
+    {
+        var request = ChatGptProvider.BuildRequest(new CompletionOptions
+        {
+            Model = "gpt-5.6-sol",
+            Effort = EffortLevel.ExtraHigh,
+            Messages = [Message.FromText(MessageRole.User, "hello")]
+        });
+
+        Assert.Equal("xhigh", request["reasoning"]!["effort"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void OpenAiReasoningRequestIncludesEffort()
+    {
+        var provider = new OpenAiProvider(apiKey: "test");
+        var request = provider.BuildRequest(new CompletionOptions
+        {
+            Model = "o3",
+            Effort = EffortLevel.High,
+            Messages = [Message.FromText(MessageRole.User, "hello")]
+        });
+
+        Assert.Equal("high", request["reasoning_effort"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void OpenAiNonReasoningRequestOmitsEffort()
+    {
+        var provider = new OpenAiProvider(apiKey: "test");
+        var request = provider.BuildRequest(new CompletionOptions
+        {
+            Model = "gpt-4.1",
+            Effort = EffortLevel.High,
+            Messages = [Message.FromText(MessageRole.User, "hello")]
+        });
+
+        Assert.Null(request["reasoning_effort"]);
+    }
+
+    [Fact]
     public void GoogleRequestUsesNativeInlineData()
     {
         var provider = new GoogleProvider(apiKey: "test");

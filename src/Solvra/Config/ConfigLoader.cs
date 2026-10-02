@@ -81,6 +81,15 @@ public static partial class ConfigLoader
             if (json.TryGetProperty("effort", out var effortProp) && effortProp.ValueKind == JsonValueKind.String)
                 result = result with { Effort = effortProp.GetString()! };
 
+            if (json.TryGetProperty("subagents", out var subagentsProp) && subagentsProp.ValueKind == JsonValueKind.String)
+                result = result with { Subagents = subagentsProp.GetString()! };
+
+            if (json.TryGetProperty("subagent_model", out var subagentModelProp) && subagentModelProp.ValueKind == JsonValueKind.String)
+                result = result with { SubagentModel = subagentModelProp.GetString() };
+
+            if (json.TryGetProperty("subagent_effort", out var subagentEffortProp) && subagentEffortProp.ValueKind == JsonValueKind.String)
+                result = result with { SubagentEffort = subagentEffortProp.GetString() };
+
             if (json.TryGetProperty("max_turns", out var maxTurnsProp) && maxTurnsProp.ValueKind == JsonValueKind.Number)
                 result = result with { MaxTurns = maxTurnsProp.GetInt32() };
 
@@ -186,6 +195,9 @@ public static partial class ConfigLoader
         var model = Environment.GetEnvironmentVariable("SOLVRA_MODEL");
         var provider = Environment.GetEnvironmentVariable("SOLVRA_PROVIDER");
         var effort = Environment.GetEnvironmentVariable("SOLVRA_EFFORT");
+        var subagents = Environment.GetEnvironmentVariable("SOLVRA_SUBAGENTS");
+        var subagentModel = Environment.GetEnvironmentVariable("SOLVRA_SUBAGENT_MODEL");
+        var subagentEffort = Environment.GetEnvironmentVariable("SOLVRA_SUBAGENT_EFFORT");
         var maxTurns = Environment.GetEnvironmentVariable("SOLVRA_MAX_TURNS");
         var maxBudget = Environment.GetEnvironmentVariable("SOLVRA_MAX_BUDGET");
         var permMode = Environment.GetEnvironmentVariable("SOLVRA_PERMISSION_MODE");
@@ -205,6 +217,9 @@ public static partial class ConfigLoader
             Provider = !string.IsNullOrEmpty(provider) ? provider : config.Provider,
             ProviderIsExplicit = config.ProviderIsExplicit || !string.IsNullOrEmpty(provider),
             Effort = !string.IsNullOrEmpty(effort) ? effort : config.Effort,
+            Subagents = !string.IsNullOrEmpty(subagents) ? subagents : config.Subagents,
+            SubagentModel = !string.IsNullOrEmpty(subagentModel) ? subagentModel : config.SubagentModel,
+            SubagentEffort = !string.IsNullOrEmpty(subagentEffort) ? subagentEffort : config.SubagentEffort,
             MaxTurns = int.TryParse(maxTurns, out var mt) ? mt : config.MaxTurns,
             MaxBudgetUsd = decimal.TryParse(maxBudget, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : config.MaxBudgetUsd,
             Reflection = reflection is "1" or "true" ? true : reflection is "0" or "false" ? false : config.Reflection,
