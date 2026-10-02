@@ -165,7 +165,7 @@ public sealed class AgentLoop
             ["provider"] = provider.Id
         });
 
-        while (turns < options.Session.MaxTurns)
+        while (options.Session.MaxTurns == 0 || turns < options.Session.MaxTurns)
         {
             ct.ThrowIfCancellationRequested();
             turns++;
@@ -317,7 +317,7 @@ public sealed class AgentLoop
             if (response.ToolCalls.Count == 0)
             {
                 var text = response.Text ?? "";
-                if (response.StopReason == "max_tokens" && lengthContinuations < MaxLengthContinuations && turns < options.Session.MaxTurns)
+                if (response.StopReason == "max_tokens" && lengthContinuations < MaxLengthContinuations && HasTurnsRemaining(options.Session.MaxTurns, turns))
                 {
                     lengthContinuations++;
                     lastText += text;
@@ -333,7 +333,7 @@ public sealed class AgentLoop
                     await SafeLog(() => _sessionManager.LogAssistantMessageAsync(options.Session, lastText));
 
                 if (!options.NoTools && !progress.BrowserVerificationReminderSent && !progress.BrowserValidationObserved &&
-                    RequiresBrowserValidation(options.Prompt) && turns < options.Session.MaxTurns)
+                    RequiresBrowserValidation(options.Prompt) && HasTurnsRemaining(options.Session.MaxTurns, turns))
                 {
                     progress.BrowserVerificationReminderSent = true;
                     messages.Add(Message.FromText(MessageRole.User,
@@ -607,6 +607,7 @@ public sealed class AgentLoop
                     Model = options.SubagentModel ?? options.Session.Model,
                     Provider = options.SubagentModel is null ? options.Session.Provider : null,
                     Effort = options.SubagentEffort ?? options.Session.Effort,
+                    MaxTurns = options.Session.MaxTurns,
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -665,6 +666,9 @@ public sealed class AgentLoop
             },
             result.Image);
     }
+
+    internal static bool HasTurnsRemaining(int maxTurns, int completedTurns) =>
+        maxTurns == 0 || completedTurns < maxTurns;
 
     internal static bool RequiresBrowserValidation(string prompt)
     {

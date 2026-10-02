@@ -37,4 +37,5 @@ public record ToolExecutionContext(
     public string? Model { get; init; }
     public string? Provider { get; init; }
     public Models.EffortLevel Effort { get; init; } = Models.EffortLevel.Medium;
+    public int MaxTurns { get; init; }
 }

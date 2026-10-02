@@ -45,7 +45,7 @@ public class AgentTool : ToolBase
             model = new { type = "string", description = "Model to use (optional, defaults to the configured subagent model or current model)" },
             effort = new { type = "string", @enum = new[] { "low", "medium", "high", "xhigh" }, description = "Reasoning effort (optional, defaults to the configured subagent effort or current effort)" },
             system_prompt = new { type = "string", description = "Custom system prompt (optional)" },
-            max_turns = new { type = "integer", description = "Maximum turns (default 20)" }
+            max_turns = new { type = "integer", minimum = 0, description = "Maximum turns (optional; omitted inherits the parent limit, 0 means unlimited)" }
         },
         required = new[] { "prompt" }
     });
@@ -68,7 +68,10 @@ public class AgentTool : ToolBase
             return new ToolExecuteResult($"Error: invalid effort '{effortText}'. Expected low, medium, high, or xhigh.", true);
         var effort = effortText is null ? context.Effort : EffortLevelExtensions.Parse(effortText);
         var systemPrompt = GetOptionalString(input, "system_prompt");
-        var maxTurns = Math.Clamp(GetInt(input, "max_turns", 20), 1, 100);
+        var requestedMaxTurns = GetOptionalInt(input, "max_turns");
+        var maxTurns = requestedMaxTurns ?? context.MaxTurns;
+        if (maxTurns < 0)
+            return new ToolExecuteResult("Error: max_turns must be 0 (unlimited) or a positive integer.", true);
 
         if (RunAgentDelegate == null)
             return new ToolExecuteResult("Error: agent loop not configured. Set AgentTool.RunAgentDelegate.", true);

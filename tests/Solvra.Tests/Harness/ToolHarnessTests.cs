@@ -383,6 +383,30 @@ public class ToolHarnessTests : IDisposable
     }
 
     [Fact]
+    public async Task AgentTool_InheritsTurnLimitAndAllowsUnlimitedOverride()
+    {
+        SubagentRequest? request = null;
+        var previous = AgentTool.RunAgentDelegate;
+        AgentTool.RunAgentDelegate = (r, _) => { request = r; return Task.FromResult("ok"); };
+        try
+        {
+            var context = Ctx() with { MaxTurns = 25 };
+            await new AgentTool().ExecuteAsync(In(new { prompt = "go" }), context);
+            Assert.Equal(25, request!.MaxTurns);
+
+            await new AgentTool().ExecuteAsync(In(new { prompt = "go", max_turns = 0 }), context);
+            Assert.Equal(0, request!.MaxTurns);
+
+            await new AgentTool().ExecuteAsync(In(new { prompt = "go", max_turns = 7 }), context);
+            Assert.Equal(7, request!.MaxTurns);
+        }
+        finally
+        {
+            AgentTool.RunAgentDelegate = previous;
+        }
+    }
+
+    [Fact]
     public async Task AgentTool_RejectsDisabledAndInvalidEffort()
     {
         var tool = new AgentTool();
@@ -393,6 +417,10 @@ public class ToolHarnessTests : IDisposable
         var invalid = await tool.ExecuteAsync(In(new { prompt = "go", effort = "huge" }), Ctx());
         Assert.True(invalid.IsError);
         Assert.Contains("invalid effort", invalid.Output);
+
+        var invalidTurns = await tool.ExecuteAsync(In(new { prompt = "go", max_turns = -1 }), Ctx());
+        Assert.True(invalidTurns.IsError);
+        Assert.Contains("max_turns", invalidTurns.Output);
     }
 
     [Fact]

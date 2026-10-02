@@ -53,7 +53,12 @@ public static class Program
         providerOption.AddAlias("-p");
         var modelOption = new Option<string?>("--model", "Model to use (provider:model pins the provider)");
         modelOption.AddAlias("-m");
-        var maxTurnsOption = new Option<int?>("--max-turns", "Max turns (default from config, 50)");
+        var maxTurnsOption = new Option<int?>("--max-turns", "Maximum turns; 0 means unlimited (default: unlimited)");
+        maxTurnsOption.AddValidator(r =>
+        {
+            if (r.GetValueOrDefault<int?>() is < 0)
+                r.ErrorMessage = "--max-turns must be 0 (unlimited) or a positive integer.";
+        });
         var jsonOption = new Option<bool>("--json", "Output as JSON");
         var autoOption = new Option<bool>("--auto", "Auto-approve all tool permissions");
         var planOption = new Option<bool>("--plan", "Plan mode: read-only tools only");

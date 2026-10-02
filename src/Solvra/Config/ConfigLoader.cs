@@ -91,7 +91,11 @@ public static partial class ConfigLoader
                 result = result with { SubagentEffort = subagentEffortProp.GetString() };
 
             if (json.TryGetProperty("max_turns", out var maxTurnsProp) && maxTurnsProp.ValueKind == JsonValueKind.Number)
-                result = result with { MaxTurns = maxTurnsProp.GetInt32() };
+            {
+                var maxTurns = maxTurnsProp.GetInt32();
+                if (maxTurns < 0) throw new FormatException("max_turns must be 0 (unlimited) or a positive integer.");
+                result = result with { MaxTurns = maxTurns };
+            }
 
             if (json.TryGetProperty("max_budget_usd", out var maxBudgetProp) && maxBudgetProp.ValueKind == JsonValueKind.Number)
                 result = result with { MaxBudgetUsd = maxBudgetProp.GetDecimal() };
@@ -220,7 +224,7 @@ public static partial class ConfigLoader
             Subagents = !string.IsNullOrEmpty(subagents) ? subagents : config.Subagents,
             SubagentModel = !string.IsNullOrEmpty(subagentModel) ? subagentModel : config.SubagentModel,
             SubagentEffort = !string.IsNullOrEmpty(subagentEffort) ? subagentEffort : config.SubagentEffort,
-            MaxTurns = int.TryParse(maxTurns, out var mt) ? mt : config.MaxTurns,
+            MaxTurns = int.TryParse(maxTurns, out var mt) && mt >= 0 ? mt : config.MaxTurns,
             MaxBudgetUsd = decimal.TryParse(maxBudget, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var mb) ? mb : config.MaxBudgetUsd,
             Reflection = reflection is "1" or "true" ? true : reflection is "0" or "false" ? false : config.Reflection,
             MaxTokens = int.TryParse(maxTokens, out var mtk) && mtk > 0 ? mtk : config.MaxTokens,

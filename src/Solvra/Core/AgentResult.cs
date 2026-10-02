@@ -77,7 +77,8 @@ public record SessionConfig
     public IReadOnlyList<string> DisallowedTools { get; init; } = [];
     public string PermissionMode { get; init; } = "default";
     public EffortLevel Effort { get; init; } = EffortLevel.Medium;
-    public int MaxTurns { get; init; } = 50;
+    /// <summary>Maximum model turns. Zero means unlimited.</summary>
+    public int MaxTurns { get; init; } = 0;
     public decimal MaxBudgetUsd { get; init; } = 5.0m;
     public int MaxTokens { get; init; } = 8192;
     public string FilePath { get; init; } = "";

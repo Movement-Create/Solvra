@@ -253,6 +253,8 @@ CLI
 - Based on `origin/main` at `b25ee1d`; implementation is isolated in this worktree.
 - Added strict `low|medium|high|xhigh` effort parsing (`max` remains compatible), subagent `auto|off`, child model/effort defaults, and per-child effort overrides.
 - Effort is propagated to child sessions, audit/tracing, OpenAI reasoning payloads and ChatGPT Responses payloads. Disabled delegation is omitted from model tools and rejected if directly invoked.
-- `dotnet test Solvra.sln`: 374 passed, 0 failed; CLI help and invalid-value probes passed.
-- Browser gate: Playwright with Chromium 153 executed benign, malformed JSON, invalid-value, and hostile-text cases; malformed/invalid inputs were rejected without changing rendered state and hostile markup remained inert text. This is supplemental because the feature itself changes .NET CLI/config/provider paths, not browser code.
+- `dotnet test Solvra.sln`: 376 passed, 0 failed; the scripted loop completed 52 turns under the unlimited default. CLI help and invalid-value probes passed.
+- VS Code extension `npm run compile`: passed; its max-turns default is also unlimited and explicit `0` is preserved.
+- Browser gate: Playwright with Chromium 153 executed benign unlimited (`0`) and limited (`50`) inputs plus negative, malformed, and hostile-script cases; invalid inputs were rejected without changing rendered state and no script executed. This is supplemental because runtime turn handling remains in .NET.
+- Removed the implicit 50-turn ceiling: `max_turns` now defaults to `0` (unlimited), while positive explicit limits retain the existing MaxTurns stop behavior. Subagents inherit the parent limit unless they explicitly request another value.
 - The implementation was committed and pushed to draft PR #2. No deployment, service change, or paid model call performed.

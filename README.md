@@ -50,7 +50,7 @@ dotnet run --project src/Solvra -- chat
 -p, --provider   LLM provider (anthropic, openai, google, ollama, moonshot, chatgpt).
                  An explicit provider always wins over guessing from the model name.
 -m, --model      Model name; "provider:model" pins the provider (e.g. openai:qwen3.8-flash)
---max-turns      Maximum agent turns (default: config max_turns, 50)
+--max-turns      Maximum agent turns (default: unlimited; 0 means unlimited)
 --effort         Reasoning effort: low, medium, high, xhigh (max remains an alias)
 --subagents      Subagent delegation: auto or off
 --subagent-model Default child model (otherwise inherits the current model)
@@ -70,7 +70,10 @@ dotnet run --project src/Solvra -- chat
 --reflect        Run the post-task lesson-saving pass (off by default)
 ```
 
-`solvra run -` reads the prompt from stdin. Exit codes: 0 done, 1 error, 2 turn limit, 3 budget limit.
+`solvra run -` reads the prompt from stdin. Runs are unlimited by default and still stop on completion,
+explicit deadline/cancellation, budget, or provider error. Set a positive `--max-turns` (or `max_turns` /
+`SOLVRA_MAX_TURNS`) when a turn cap is desired; `0` means unlimited. Exit codes: 0 done, 1 error,
+2 explicit turn limit, 3 budget limit, 4 deadline.
 
 ### Chat
 

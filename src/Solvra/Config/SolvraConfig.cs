@@ -30,8 +30,9 @@ public record SolvraConfig
     [JsonPropertyName("subagent_effort")]
     public string? SubagentEffort { get; init; }
 
+    /// <summary>Maximum model turns per run. Zero means unlimited.</summary>
     [JsonPropertyName("max_turns")]
-    public int MaxTurns { get; init; } = 50;
+    public int MaxTurns { get; init; } = 0;
 
     [JsonPropertyName("max_budget_usd")]
     public decimal MaxBudgetUsd { get; init; } = 5.0m;
