@@ -59,7 +59,7 @@ export class AgentRunner {
     return {
       provider: config.get<string>('provider', 'google'),
       model: config.get<string>('model', 'gemini-2.5-flash'),
-      maxTurns: config.get<number>('maxTurns', 10),
+      maxTurns: config.get<number>('maxTurns', 0),
       autoApprove: config.get<boolean>('autoApprove', true),
       googleApiKey: config.get<string>('googleApiKey', ''),
       anthropicApiKey: config.get<string>('anthropicApiKey', ''),
@@ -254,7 +254,7 @@ export class AgentRunner {
       throw new Error(`Missing API key for provider "${provider}". Set it in Solvra settings and try again.`);
     }
 
-    const maxTurns = options.maxTurns || config.maxTurns;
+    const maxTurns = options.maxTurns ?? config.maxTurns;
     const mode = options.mode || this._config.mode || 'auto';
     const auto = options.auto !== undefined ? options.auto : config.autoApprove;
 

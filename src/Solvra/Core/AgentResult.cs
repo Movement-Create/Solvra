@@ -26,6 +26,13 @@ public record AgentRunOptions
     public Action<ToolResult>? OnToolResult { get; init; }
     public int SubagentDepth { get; init; }
 
+    /// <summary>Whether this run may delegate work through the agent tool.</summary>
+    public bool SubagentsEnabled { get; init; } = true;
+
+    /// <summary>Defaults for child runs; null means inherit the current run.</summary>
+    public string? SubagentModel { get; init; }
+    public EffortLevel? SubagentEffort { get; init; }
+
     /// <summary>Maximum elapsed time for this run. Null means no deadline.</summary>
     public TimeSpan? TimeLimit { get; init; }
 
@@ -70,7 +77,8 @@ public record SessionConfig
     public IReadOnlyList<string> DisallowedTools { get; init; } = [];
     public string PermissionMode { get; init; } = "default";
     public EffortLevel Effort { get; init; } = EffortLevel.Medium;
-    public int MaxTurns { get; init; } = 50;
+    /// <summary>Maximum model turns. Zero means unlimited.</summary>
+    public int MaxTurns { get; init; } = 0;
     public decimal MaxBudgetUsd { get; init; } = 5.0m;
     public int MaxTokens { get; init; } = 8192;
     public string FilePath { get; init; } = "";

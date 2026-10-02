@@ -247,3 +247,14 @@ CLI
 - Not done: LLM-generated summaries during compaction (truncation + notice only), persistent shell cwd across
   bash calls, undo/checkpoints for edits, per-project memory namespaces.
 - Rollback: `rm -rf ~/.local/opt/solvra && cp -a ~/.local/opt/solvra.bak-20260921-pre-harness-fixes ~/.local/opt/solvra && systemctl --user restart solvra`.
+
+## 2026-10-02 — Subagent and effort controls (feature/subagent-effort)
+
+- Based on `origin/main` at `b25ee1d`; implementation is isolated in this worktree.
+- Added strict `low|medium|high|xhigh` effort parsing (`max` remains compatible), subagent `auto|off`, child model/effort defaults, and per-child effort overrides.
+- Effort is propagated to child sessions, audit/tracing, OpenAI reasoning payloads and ChatGPT Responses payloads. Disabled delegation is omitted from model tools and rejected if directly invoked.
+- `dotnet test Solvra.sln`: 376 passed, 0 failed; the scripted loop completed 52 turns under the unlimited default. CLI help and invalid-value probes passed.
+- VS Code extension `npm run compile`: passed; its max-turns default is also unlimited and explicit `0` is preserved.
+- Browser gate: Playwright with Chromium 153 executed benign unlimited (`0`) and limited (`50`) inputs plus negative, malformed, and hostile-script cases; invalid inputs were rejected without changing rendered state and no script executed. This is supplemental because runtime turn handling remains in .NET.
+- Removed the implicit 50-turn ceiling: `max_turns` now defaults to `0` (unlimited), while positive explicit limits retain the existing MaxTurns stop behavior. Subagents inherit the parent limit unless they explicitly request another value.
+- The implementation was committed and pushed to draft PR #2. No deployment, service change, or paid model call performed.

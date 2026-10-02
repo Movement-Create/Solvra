@@ -291,6 +291,21 @@ public class AgentLoopHarnessTests : IDisposable
     }
 
     [Fact]
+    public async Task UnlimitedDefault_ContinuesPastFormerFiftyTurnLimit()
+    {
+        var provider = new ScriptedProvider();
+        for (var i = 0; i < 51; i++)
+            provider.Then(ScriptedProvider.Tool("glob", new { pattern = "*.none" }, $"call-{i}"));
+        provider.Then(ScriptedProvider.Text("done"));
+
+        var result = await Loop(provider).RunAsync(Options("keep going", maxTurns: 0));
+
+        Assert.Equal(StopReason.Text, result.StopReason);
+        Assert.Equal(52, result.Turns);
+        Assert.Equal("done", result.Text);
+    }
+
+    [Fact]
     public async Task TurnLimit_IsReportedInText()
     {
         var provider = new ScriptedProvider()

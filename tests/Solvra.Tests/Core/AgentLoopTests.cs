@@ -29,14 +29,16 @@ public class AgentLoopTests
     }
 
     [Fact]
-    public void MaxTurns_DefaultIs50InSessionConfig()
+    public void MaxTurns_DefaultIsUnlimitedInSessionConfig()
     {
         var config = new SessionConfig
         {
             Id = "test",
             CreatedAt = DateTime.UtcNow.ToString("o")
         };
-        Assert.Equal(50, config.MaxTurns);
+        Assert.Equal(0, config.MaxTurns);
+        Assert.True(AgentLoop.HasTurnsRemaining(config.MaxTurns, 50_000));
+        Assert.False(AgentLoop.HasTurnsRemaining(50, 50));
     }
 
     [Fact]

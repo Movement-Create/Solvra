@@ -126,8 +126,9 @@
         },
         "solvra.maxTurns": {
           "type": "number",
-          "default": 10,
-          "description": "Default maximum number of agent turns"
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum number of agent turns (0 means unlimited)"
         },
         "solvra.autoApprove": {
           "type": "boolean",

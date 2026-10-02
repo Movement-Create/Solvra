@@ -20,4 +20,5 @@ public record CompletionOptions
     public double? Temperature { get; init; }
     public bool Stream { get; init; }
     public required string Model { get; init; }
+    public EffortLevel Effort { get; init; } = EffortLevel.Medium;
 }

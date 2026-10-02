@@ -55,6 +55,7 @@ public sealed class Reflection
                 OnToolCall = null,
                 OnToolResult = null,
                 SubagentDepth = options.SubagentDepth,
+                SubagentsEnabled = false,
                 Deadline = options.Deadline,
                 ProcessTracker = options.ProcessTracker,
                 Cwd = options.Cwd,
