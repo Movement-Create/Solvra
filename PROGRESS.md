@@ -1,3 +1,16 @@
+# Limits and completion fix — 2026-10-10
+
+Task worktree: `/home/cosmos/wt/github/Solvra/limits-validation`, branch `fix/limits-validation`, base `origin/main` at `a9f69d8`.
+
+- Raised the default model request timeout from 600 to 1800 seconds; zero still disables it and explicit overrides remain honored.
+- Confirmed main/subagent turn defaults already unlimited; existing regression exercises 52 turns and explicit caps.
+- Removed the post-answer keyword browser gate and tool-input evidence heuristic. Added upfront task-relevant validation and honest result reporting guidance. This deliberately leaves validation selection to the model rather than claiming keyword matches prove correctness.
+- Added streaming/nonstreaming regressions to ensure final output does not trigger another model request.
+- Verification: `dotnet test Solvra.sln --nologo --verbosity minimal` passed 374/374 tests, including streaming/nonstreaming completion, 52-turn unlimited run, explicit turn caps, and timeout overrides. CLI help confirms 1800 seconds and unlimited turns. `git diff --check` passed. Existing CS1998 warnings remain.
+- Deployment authorized 2026-10-11. Preparing local source commit and immutable release; retain previous release for rollback. No push requested. Explicit persisted timeout/turn settings continue to take precedence. No live provider calls were made.
+
+---
+
 # Solvra harness fixes — progress
 
 ## Configurable model request timeout — 2026-10-01

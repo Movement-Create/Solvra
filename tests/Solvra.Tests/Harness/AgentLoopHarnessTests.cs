@@ -270,24 +270,32 @@ public class AgentLoopHarnessTests : IDisposable
         await Loop(provider).RunAsync(Options("What does this say?") with { UserMessage = user });
     }
 
-    [Fact]
-    public async Task BrowserDependentTask_GetsOneVerificationGateBeforeCompletion()
+    [Theory]
+    [InlineData(false, "Remove executable JavaScript from HTML and block XSS")]
+    [InlineData(true, "Remove executable JavaScript from HTML and block XSS")]
+    [InlineData(false, "Explain XSS without running tests")]
+    [InlineData(true, "Explain XSS without running tests")]
+    public async Task Completion_DoesNotReopenForKeywordTriggeredValidation(bool streaming, string prompt)
     {
-        var provider = new ScriptedProvider()
-            .Then(ScriptedProvider.Text("string tests pass"))
-            .Then(options =>
-            {
-                var reminder = options.Messages[^1].Content.OfType<TextContent>().Single().Text;
-                Assert.Contains("browser automation", reminder, StringComparison.OrdinalIgnoreCase);
-                return ScriptedProvider.Text("browser validation unavailable; result is unverified");
-            });
+        var output = new System.Text.StringBuilder();
+        var provider = new ScriptedProvider().Then(options =>
+        {
+            Assert.Contains("Complete relevant validation before delivering the final answer", options.System);
+            Assert.Contains("alone does not require browser automation", options.System);
+            return ScriptedProvider.Text("Final answer with verification limitations.");
+        });
 
-        var result = await Loop(provider).RunAsync(
-            Options("Remove executable JavaScript from HTML and block XSS"));
+        var result = await Loop(provider).RunAsync(Options(prompt) with
+        {
+            Streaming = streaming,
+            OnText = text => output.Append(text)
+        });
 
-        Assert.Equal(2, provider.Calls.Count);
-        Assert.Equal(2, result.Turns);
-        Assert.Equal("browser validation unavailable; result is unverified", result.Text);
+        Assert.Single(provider.Calls);
+        Assert.Equal(StopReason.Text, result.StopReason);
+        Assert.Equal(1, result.Turns);
+        Assert.Equal("Final answer with verification limitations.", result.Text);
+        Assert.Equal(result.Text, output.ToString());
     }
 
     [Fact]

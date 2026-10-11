@@ -92,7 +92,7 @@ public record SolvraConfig
     /// caller cancellation and the run deadline still apply.
     /// </summary>
     [JsonPropertyName("model_timeout_seconds")]
-    public int ModelTimeoutSeconds { get; init; } = 600;
+    public int ModelTimeoutSeconds { get; init; } = Solvra.Providers.ProviderHttpClient.DefaultTimeoutSeconds;
 
     public EffortLevel ParsedEffort => EffortLevelExtensions.Parse(Effort);
     public EffortLevel? ParsedSubagentEffort => SubagentEffort is null ? null : EffortLevelExtensions.Parse(SubagentEffort);

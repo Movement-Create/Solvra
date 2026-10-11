@@ -3,7 +3,7 @@ namespace Solvra.Providers;
 /// <summary>Creates provider clients without inheriting HttpClient's hidden 100-second default.</summary>
 internal static class ProviderHttpClient
 {
-    public const int DefaultTimeoutSeconds = 600;
+    public const int DefaultTimeoutSeconds = 1800;
     public const int MaxTimeoutSeconds = 86_400;
 
     public static HttpClient Create(int timeoutSeconds)

@@ -61,8 +61,6 @@ public sealed class AgentLoop
         public string? ActiveOperationId;
         public string? ActiveOperationType;
         public bool DeadlineWarningSent;
-        public bool BrowserVerificationReminderSent;
-        public bool BrowserValidationObserved;
         public List<Message> Messages = [];
     }
 
@@ -332,17 +330,6 @@ public sealed class AgentLoop
                 if (options.LogToSession)
                     await SafeLog(() => _sessionManager.LogAssistantMessageAsync(options.Session, lastText));
 
-                if (!options.NoTools && !progress.BrowserVerificationReminderSent && !progress.BrowserValidationObserved &&
-                    RequiresBrowserValidation(options.Prompt) && HasTurnsRemaining(options.Session.MaxTurns, turns))
-                {
-                    progress.BrowserVerificationReminderSent = true;
-                    messages.Add(Message.FromText(MessageRole.User,
-                        "Verification gate: this task depends on browser parsing or JavaScript execution, but no browser automation has been run. " +
-                        "Use the available Chromium/Selenium, Playwright, Puppeteer, or equivalent browser runner against malformed and benign cases before finishing. " +
-                        "If browser execution is truly unavailable, state that explicitly and leave the result marked unverified."));
-                    continue;
-                }
-
                 await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, currentCost);
                 if (!options.NoTools) await _hookEngine.FireStopAsync(sessionId, turns, lastText);
                 await LogSessionEnd(sessionId, turns, currentCost, "Text");
@@ -558,8 +545,6 @@ public sealed class AgentLoop
         PermissionMode permissionMode, string stopReason, RunProgress progress, CancellationToken ct)
     {
         options.OnToolCall?.Invoke(tc);
-        if (ProvidesBrowserValidationEvidence(tc))
-            progress.BrowserValidationObserved = true;
 
         ToolExecuteResult result;
         if (tc.Input.TryGetValue(OpenAiProvider.ArgumentParseErrorKey, out var rawArgs))
@@ -669,24 +654,6 @@ public sealed class AgentLoop
 
     internal static bool HasTurnsRemaining(int maxTurns, int completedTurns) =>
         maxTurns == 0 || completedTurns < maxTurns;
-
-    internal static bool RequiresBrowserValidation(string prompt)
-    {
-        var text = prompt.ToLowerInvariant();
-        return text.Contains("xss", StringComparison.Ordinal) ||
-               (text.Contains("html", StringComparison.Ordinal) &&
-                (text.Contains("javascript", StringComparison.Ordinal) || text.Contains("browser", StringComparison.Ordinal)));
-    }
-
-    internal static bool ProvidesBrowserValidationEvidence(ToolCall call)
-    {
-        var input = JsonSerializer.Serialize(call.Input).ToLowerInvariant();
-        return input.Contains("webdriver", StringComparison.Ordinal) ||
-               input.Contains("playwright", StringComparison.Ordinal) ||
-               input.Contains("puppeteer", StringComparison.Ordinal) ||
-               input.Contains("chromium --headless", StringComparison.Ordinal) ||
-               input.Contains("chrome --headless", StringComparison.Ordinal);
-    }
 
     private async Task<AgentRunResult> FailAsync(
         AgentRunOptions options, string sessionId, List<Message> messages, string lastText, int turns,

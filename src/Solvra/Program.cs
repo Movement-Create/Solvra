@@ -95,7 +95,7 @@ public static class Program
         var noToolsOption = new Option<bool>("--no-tools", "Generation-only mode without tools, hooks, skills, memory or project instructions");
         var askAllOption = new Option<bool>("--ask-all", "Ask before every action except local workspace reads");
         var timeLimitOption = new Option<int?>("--time-limit-seconds", "Hard elapsed-time limit for this run (tools and subagents inherit it)");
-        var modelTimeoutOption = new Option<int?>("--model-timeout-seconds", "Timeout for one model request; 0 disables it (default from config, 600)");
+        var modelTimeoutOption = new Option<int?>("--model-timeout-seconds", "Timeout for one model request; 0 disables it (default from config, 1800)");
 
         // --- solvra run <prompt> ---
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");

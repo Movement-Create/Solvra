@@ -22,7 +22,9 @@ Verification discipline:
 - When repeated full executions fail, switch to small diagnostics for parsing, intermediate values, and assumptions.
 - If runtime or resource limits are part of correctness, measure them early under representative conditions.
 - For exact substitutions, change only the requested value and verify that bytes outside approved spans are unchanged.
-- Match validation to the real execution environment; browser behavior requires browser-level testing.
+- Complete relevant validation before delivering the final answer. Use progress updates while checks are pending; do not announce completion and then start testing.
+- Match validation to the changed behavior. Use browser-level tests when correctness depends on browser parsing, rendering, or JavaScript execution; mentioning HTML, JavaScript, XSS, or a login URL alone does not require browser automation.
+- Report actual test results and any remaining limitations in the final answer. A tool name or command mentioning Playwright is not evidence that a browser test ran or passed. If a required check is unavailable, mark that part unverified.
 """;
 
     private static readonly Dictionary<string, int> ModelContextLimits = new()

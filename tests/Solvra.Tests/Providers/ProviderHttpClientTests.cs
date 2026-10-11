@@ -5,10 +5,11 @@ namespace Solvra.Tests.Providers;
 public class ProviderHttpClientTests
 {
     [Fact]
-    public void DefaultTimeout_IsLongerThanDotNetDefault()
+    public void DefaultTimeout_AllowsThirtyMinutes()
     {
         using var client = ProviderHttpClient.Create(ProviderHttpClient.DefaultTimeoutSeconds);
-        Assert.Equal(TimeSpan.FromMinutes(10), client.Timeout);
+        Assert.Equal(TimeSpan.FromMinutes(30), client.Timeout);
+        Assert.Equal(1800, new Solvra.Config.SolvraConfig().ModelTimeoutSeconds);
     }
 
     [Fact]

@@ -66,7 +66,7 @@ dotnet run --project src/Solvra -- chat
 --no-session     Don't write a session file
 --cwd <dir>      Working directory for tools and project instructions
 --max-budget     Max estimated USD per run (0 = no limit; unknown/subscription models cost 0)
---model-timeout-seconds  Max time for one model request (default 600; 0 disables it)
+--model-timeout-seconds  Max time for one model request (default 1800; 0 disables it)
 --reflect        Run the post-task lesson-saving pass (off by default)
 ```
 
@@ -109,10 +109,16 @@ directory (and `~/.config/solvra/SOLVRA.md` for user-wide rules).
 | Google | gemini-2.5-pro, gemini-2.5-flash | `GOOGLE_API_KEY` |
 | Ollama | llama3.1, llama3.2, any local model | (local, no key needed) |
 
-Model requests default to a 600-second timeout instead of .NET's implicit 100-second limit. Set
+Model requests default to an 1800-second (30-minute) timeout instead of .NET's implicit 100-second limit. Set
 `model_timeout_seconds` in `solvra.json5`, `SOLVRA_MODEL_TIMEOUT_SECONDS`, or
 `--model-timeout-seconds` for `run`/`chat`; use `0` to rely only on caller cancellation and the
-run-level `--time-limit-seconds` deadline.
+run-level `--time-limit-seconds` deadline. Explicit configuration values still override the default.
+Turns are unlimited by default (`--max-turns 0`); a positive value sets an explicit cap.
+
+Validation is part of the task, before the final answer. Solvra supplies this guidance at the start
+of each run and leaves test selection to the model based on the actual work. It no longer injects
+a browser-test request after a final answer based on prompt keywords. This is guidance, not a
+mechanical guarantee that the model performed all relevant checks.
 
 Effort is carried independently from model selection. OpenAI reasoning models receive
 `reasoning_effort`, and ChatGPT Responses requests receive `reasoning.effort`; other providers retain

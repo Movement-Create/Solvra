@@ -72,34 +72,6 @@ public class AgentLoopTests
         Assert.Equal(1, deadline.CapTimeoutMilliseconds(600_000));
     }
 
-    [Theory]
-    [InlineData("Remove executable JavaScript from HTML", true)]
-    [InlineData("Harden this page against XSS", true)]
-    [InlineData("Parse an HTML report without executing scripts", false)]
-    [InlineData("Rename the JavaScript function", false)]
-    public void BrowserValidationRequirement_IsNarrowlyDetected(string prompt, bool expected)
-    {
-        Assert.Equal(expected, AgentLoop.RequiresBrowserValidation(prompt));
-    }
-
-    [Fact]
-    public void BrowserValidationEvidence_RequiresActualAutomation()
-    {
-        static ToolCall Call(string command) => new()
-        {
-            Id = "call",
-            Name = "bash",
-            Input = new Dictionary<string, JsonElement>
-            {
-                ["command"] = JsonSerializer.SerializeToElement(command)
-            }
-        };
-
-        Assert.False(AgentLoop.ProvidesBrowserValidationEvidence(Call("python -c 'import selenium'")));
-        Assert.True(AgentLoop.ProvidesBrowserValidationEvidence(Call("python browser_test.py # webdriver")));
-        Assert.True(AgentLoop.ProvidesBrowserValidationEvidence(Call("chromium --headless test.html")));
-    }
-
     [Fact]
     public void AgentRunResult_MessagesAreCaptured()
     {
