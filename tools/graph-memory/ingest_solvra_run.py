@@ -128,7 +128,7 @@ async def main():
                     key = rec.get('path') or rec.get('url') or rec.get('command_sha256') or rec.get('code_sha256')
                     if not key: continue
                     async with driver.session() as s:
-                        await s.run("MATCH (tc:ToolCall {id: $id}) MERGE (e:Record {kind: $kind, key: $key}) SET e += $props MERGE (tc)-[:CITES {line: $line}]->(e)",
+                        await s.run("MATCH (tc:ToolCall {id: $id}) MERGE (e:Record {kind: $kind, key: $key}) SET e += $props MERGE (tc)-[c:CITES]->(e) SET c.line = $line",
                                     id=str(tc.id), kind=rec.get('kind', 'record'), key=key, line=rec.get('line'),
                                     props={k: v for k, v in rec.items() if k not in ('kind', 'line') and isinstance(v, (str, int, float, bool))})
                 if b["name"] == "decide" and not err:  # judgment point recorded by telemetry package B's decide tool
