@@ -1,0 +1,99 @@
+/*
+  Solvra design tokens (v3). The ONE place colours, type, spacing and motion are defined.
+  Source of truth: Plans/solvra-chat-redesign.html (approved mockup). Values not given in the
+  brief are marked "reconcile" and must be checked against the mockup's :root blocks.
+
+  Neutrals come from the VS Code theme so the panel matches the user's theme; the accent and the
+  black/white primary are Solvra's own.
+*/
+:root {
+  --sans: 'Geist Sans', 'Geist', 'IBM Plex Sans Arabic', system-ui, -apple-system, 'Segoe UI', 'Noto Sans', 'PingFang SC', 'Hiragino Sans', 'Microsoft YaHei', sans-serif;
+  --mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale (reconcile) */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --leading: 1.55;
+
+  /* Spacing (reconcile) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Motion: 150–200 ms, only to show state */
+  --dur: 170ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Neutrals from the theme */
+  --bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --faint: color-mix(in srgb, var(--fg) 45%, transparent);
+  --border: var(--vscode-widget-border, color-mix(in srgb, var(--fg) 14%, transparent));
+  --hairline: color-mix(in srgb, var(--fg) 9%, transparent);
+  --surface: color-mix(in srgb, var(--fg) 5%, transparent);
+  --surface-2: color-mix(in srgb, var(--fg) 8%, transparent);
+  --hover: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--fg) 7%, transparent));
+  --input-bg: var(--vscode-input-background, var(--surface));
+  --input-fg: var(--vscode-input-foreground, var(--fg));
+  --code-bg: var(--vscode-textCodeBlock-background, var(--surface));
+  --link: var(--vscode-textLink-foreground);
+  --menu-bg: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--bg)));
+  --menu-fg: var(--vscode-menu-foreground, var(--fg));
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.12);
+
+  /* Solvra's own: light theme defaults */
+  --accent: #5f6f8f;
+  --primary-bg: #111111;
+  --primary-fg: #ffffff;
+  --focus: var(--accent);
+  --diff-add-bg: rgba(46, 160, 67, 0.12);
+  --diff-add-fg: #1a7f37;
+  --diff-del-bg: rgba(207, 34, 46, 0.10);
+  --diff-del-fg: #b42330;
+  --ok: color-mix(in srgb, var(--fg) 55%, transparent);
+  --warn: #9a6700;
+  --error: var(--vscode-errorForeground, #b42330);
+}
+
+body.vscode-dark {
+  --accent: #9aa8c7;
+  --primary-bg: #f5f5f5;
+  --primary-fg: #0a0a0a;
+  --diff-add-bg: rgba(46, 160, 67, 0.16);
+  --diff-add-fg: #7ee2a8;
+  --diff-del-bg: rgba(248, 81, 73, 0.14);
+  --diff-del-fg: #ffa198;
+  --warn: #d29922;
+  --shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* High contrast: theme colours only, visible borders, no translucent fills. */
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --accent: var(--vscode-focusBorder);
+  --primary-bg: var(--vscode-button-background, var(--fg));
+  --primary-fg: var(--vscode-button-foreground, var(--bg));
+  --border: var(--vscode-contrastBorder, var(--fg));
+  --hairline: var(--vscode-contrastBorder, var(--fg));
+  --surface: transparent;
+  --surface-2: transparent;
+  --diff-add-bg: transparent;
+  --diff-del-bg: transparent;
+  --diff-add-fg: var(--vscode-gitDecoration-addedResourceForeground, var(--fg));
+  --diff-del-fg: var(--vscode-gitDecoration-deletedResourceForeground, var(--fg));
+  --shadow: none;
+}
+
+body[data-surface='tab'] { --bg: var(--vscode-editor-background); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 0ms; }
+}

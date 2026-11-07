@@ -33,6 +33,9 @@ vscode-extension/node_modules/
 vscode-extension/dist/
 vscode-extension/out/
 vscode-extension/*.vsix
+vscode-extension/media/v3/
+vscode-extension/webview-ui/node_modules/
+vscode-extension/webview-ui/harness/out/
 
 ## Claude Code
 .claude/
