@@ -23,8 +23,8 @@ from neo4j_agent_memory import MemoryClient, MemorySettings
 from neo4j_agent_memory.core.memory import ToolCallStatus
 
 SOLVRA = Path.home() / ".local/share/solvra"
-MISSING = ["agent_version", "source_revision", "instruction_revision", "system_prompt", "cwd (not in run records; taken from tool_use.input.cwd)",
-           "decision/judgment records (only when the run used the decide tool)", "evidence record ids on tool outputs", "verification pass/fail + attempt (only when the run used the verify tool)", "outcome/filed artifact (only from a run_end record)", "cost (always 0 for chatgpt provider)"]
+MISSING = ["agent_version / source_revision / instruction_revision / system_prompt (only when the run has a run_start record)", "cwd (not in run records; taken from tool_use.input.cwd)",
+           "decision/judgment records (only when the run used the decide tool)", "evidence record ids (only for tool_results that carry records)", "verification pass/fail + attempt (only when the run used the verify tool)", "outcome/filed artifact (only from a run_end record)", "cost (always 0 for chatgpt provider)"]
 
 def ts(s): 
     s = s.rstrip("Z"); head, _, frac = s.partition("."); 
@@ -73,6 +73,9 @@ async def main():
     config = jl(root / f"sessions/{session_id}.jsonl")[0]["data"]["config"]
     user_msgs = [e for e in sev if e["type"] == "user_message"]; finals = [e for e in sev if e["type"] == "assistant_message"]
     run_end = next((e["data"] for e in sev if e["type"] == "run_end"), None)  # written by telemetry package B; absent in older runs
+    run_start = next((e["data"] for e in sev if e["type"] == "run_start"), None)  # telemetry package A; carries revision and instruction hashes
+    all_events = jl(root / f"sessions/{session_id}.jsonl")
+    system_prompt = next((e["data"] for e in reversed([e for e in all_events if e["type"] == "system_prompt" and ts(e["timestamp"]) <= t0 + timedelta(seconds=3)])), None)
     if len(user_msgs) != 1: sys.exit(f"expected one user_message in window, found {len(user_msgs)}")
     user_text = text_of(user_msgs[0]["data"]["content"]); final_text = text_of(finals[-1]["data"]["content"]) if finals else None
     turns = [e for e in sev if e["type"] == "assistant_turn"]
@@ -115,10 +118,19 @@ async def main():
                                                duration_ms=tool_span_end.get(span["span_id"], {}).get("duration_ms"), error=(out if err else None))
                 async with driver.session() as s:
                     await s.run("MATCH (tc:ToolCall {id: $id}) SET tc.call_id=$cid, tc.position=$pos, tc.turn=$turn, tc.span_id=$span, tc.solvra_trace_id=$t, "
-                                "tc.output_bytes=$ob, tc.output_sha256=$osha, tc.input_sha256=$isha, tc.audit_duration_ms=$ad, tc.record_ids=null, tc.truncated=null",
+                                "tc.output_bytes=$ob, tc.output_sha256=$osha, tc.input_sha256=$isha, tc.audit_duration_ms=$ad, tc.record_ids=$records, tc.record_count=$rcount, tc.truncated=$trunc, tc.spill_path=$spill, tc.exit_code=$exit",
                                 id=str(tc.id), cid=b["id"], pos=pos, turn=tool_turn.get(b["id"], ti), span=span["span_id"], t=a.trace_id,
                                 ob=len(out) if out is not None else None, osha=sha(out) if out is not None else None, isha=sha(json.dumps(b["input"], sort_keys=True)),
-                                ad=tool_audit.get(b["id"], {}).get("duration_ms"))
+                                ad=tool_audit.get(b["id"], {}).get("duration_ms"),
+                                records=json.dumps((res or {}).get('records')) if (res or {}).get('records') else None, rcount=len((res or {}).get('records') or []) if res and 'records' in res else None,
+                                trunc=(res or {}).get('truncated'), spill=(res or {}).get('spill_path'), exit=(res or {}).get('exit_code'))
+                for rec in (res or {}).get('records') or []:
+                    key = rec.get('path') or rec.get('url') or rec.get('command_sha256') or rec.get('code_sha256')
+                    if not key: continue
+                    async with driver.session() as s:
+                        await s.run("MATCH (tc:ToolCall {id: $id}) MERGE (e:Record {kind: $kind, key: $key}) SET e += $props MERGE (tc)-[:CITES {line: $line}]->(e)",
+                                    id=str(tc.id), kind=rec.get('kind', 'record'), key=key, line=rec.get('line'),
+                                    props={k: v for k, v in rec.items() if k not in ('kind', 'line') and isinstance(v, (str, int, float, bool))})
                 if b["name"] == "decide" and not err:  # judgment point recorded by telemetry package B's decide tool
                     decisions.append((step.id, b["id"], b["input"], out))
                 if b["name"] == "verify" and not err:
@@ -135,8 +147,8 @@ async def main():
         async with driver.session() as s:
             await s.run("""
                 MATCH (rt:ReasoningTrace {id: $tid}) MATCH (c:Conversation {session_id: $sid})
-                MERGE (r:Run {trace_id: $t}) SET r.session_id=$sid, r.agent='solvra', r.agent_version=null, r.source_revision=null, r.instruction_revision=null,
-                  r.system_prompt=null, r.model=$model, r.provider=$provider, r.cwd=$cwd, r.permission_mode=$pm, r.effort=$effort,
+                MERGE (r:Run {trace_id: $t}) SET r.session_id=$sid, r.agent='solvra', r.agent_version=$version, r.source_revision=$source_revision, r.instruction_revision=$instruction_revision,
+                  r.instruction_files=$instruction_files, r.system_prompt_sha256=$system_prompt_sha256, r.system_prompt=$system_prompt, r.tools_sha256=$tools_sha256, r.run_start_present=$run_start_present, r.model=$model, r.provider=$provider, r.cwd=$cwd, r.permission_mode=$pm, r.effort=$effort,
                   r.started_at=datetime($t0), r.ended_at=datetime($t1), r.duration_ms=$dur, r.turns=$turns, r.tool_calls=$ncalls,
                   r.input_tokens=$itok, r.output_tokens=$otok, r.cost_usd=$cost, r.cost_known=false, r.stop_reason=$stop,
                   r.verification=$verification, r.verification_count=$vcount, r.decisions=$decisions, r.outcome_filed=$artifacts, r.artifact_count=$acount,
@@ -154,7 +166,12 @@ async def main():
                 decisions=run_end.get("decisions") if run_end else None,
                 artifacts=json.dumps(run_end["artifacts"]) if run_end and run_end.get("artifacts") else None,
                 acount=len(run_end.get("artifacts") or []) if run_end else None,
-                run_end_present=run_end is not None)
+                run_end_present=run_end is not None,
+                version=(run_start or {}).get('version'), source_revision=(run_start or {}).get('source_revision'),
+                instruction_revision=json.dumps([{'path': f['path'], 'git_blob': f.get('git_blob'), 'sha256': f.get('sha256')} for f in (run_start or {}).get('instruction_files') or []]) if run_start else None,
+                instruction_files=[f['path'] for f in (run_start or {}).get('instruction_files') or []],
+                system_prompt_sha256=(run_start or {}).get('system_prompt_sha256'), system_prompt=(system_prompt or {}).get('text'), tools_sha256=(run_start or {}).get('tools_sha256'),
+                run_start_present=run_start is not None)
             for sid_, cid, inp, out in decisions:
                 await s.run("MATCH (s:ReasoningStep {id: $sid}) CREATE (d:Decision {call_id: $cid, question: $q, answer: $ans, confidence: $conf, raw_input: $raw, raw_output: $out}) MERGE (s)-[:DECIDED]->(d)",
                             sid=str(sid_), cid=cid, q=inp.get("question"), ans=inp.get("choice", inp.get("answer")), conf=inp.get("confidence"), raw=json.dumps(inp), out=out)

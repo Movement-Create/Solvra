@@ -77,7 +77,9 @@ def main():
     # keep only calls inside this trace's time window
     t0, t1 = min(ns(s["start_time"]) for s in starts.values()), max(ns(e["timestamp"]) for e in ends.values())
     call_ids = [c for c in call_ids if t0 - 2_000_000_000 <= ns(calls[c][0]) <= t1]
-    span_to_call = dict(zip([s["span_id"] for s in tool_spans], call_ids)) if len(call_ids) == len(tool_spans) else {}
+    span_to_call = {s["span_id"]: s["attributes"]["operation_id"] for s in tool_spans if s.get("attributes", {}).get("operation_id") in calls}
+    if not span_to_call:  # older runs: spans carry no operation_id, join by order
+        span_to_call = dict(zip([s["span_id"] for s in tool_spans], call_ids)) if len(call_ids) == len(tool_spans) else {}
     if a.openinference and a.session_file and not span_to_call:
         print(f"warn: {len(tool_spans)} tool spans vs {len(call_ids)} session tool calls; I/O not attached", file=sys.stderr)
 
