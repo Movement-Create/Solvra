@@ -227,7 +227,7 @@ export function reducer(state: State, a: Action): State {
     case 'runStarted':
       return {
         ...state, runId: a.runId, hostError: null, approvals: [], chips: [],
-        turns: [...state.turns, { id: a.runId, user: { text: a.text, chips: a.chips }, items: [], agents: {}, status: 'running', startedAt: Date.now() }],
+        turns: [...state.turns, { id: a.runId, user: { text: a.text, chips: a.chips }, items: [], agents: {}, status: 'running', startedAt: a.startedAt ?? Date.now() }],
       };
     case 'stream':
       return a.runId === state.runId ? applyEvent(state, a.event) : state;
@@ -263,6 +263,9 @@ export function reducer(state: State, a: Action): State {
     case 'local/view': return { ...state, view: a.view };
     case 'local/removeChip': return { ...state, chips: state.chips.filter((_, i) => i !== a.index) };
     case 'local/clearChips': return { ...state, chips: [] };
+    case 'approvalAnswered':
+      if (a.runId !== state.runId) return state;
+      return reducer(state, { type: 'local/answered', id: a.id, decision: a.decision });
     case 'local/answered': {
       const req = state.approvals.find((x) => x.id === a.id);
       const s = { ...state, approvals: state.approvals.filter((x) => x.id !== a.id) };

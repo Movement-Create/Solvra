@@ -42,6 +42,11 @@ const port = 9300 + Math.floor(Math.random() * 500);
 const proc = spawn(code, ['--user-data-dir', prof, '--extensions-dir', '/tmp/svext', '--extensionDevelopmentPath', ext,
   '--disable-extensions', '--remote-debugging-port=' + port, '--no-sandbox', '--disable-gpu-sandbox', '--password-store=basic', '--new-window', work], { env, stdio: ['ignore', fs.openSync(path.join(out, 'vscode.log'), 'w'), fs.openSync(path.join(out, 'vscode.err.log'), 'w')] });
 process.on('exit', () => { try { proc.kill('SIGKILL'); } catch { /* gone */ } });
+process.on('unhandledRejection', async (e) => {
+  console.error(e);
+  try { await page.screenshot({ path: path.join(out, `${tag}-failure.png`) }); } catch { /* no page */ }
+  process.exit(1);
+});
 
 const log = [];
 const step = (s) => { log.push(s); console.log(s); };

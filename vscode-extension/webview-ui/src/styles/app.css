@@ -261,7 +261,10 @@ body.vscode-high-contrast .md [data-streamdown='code-block-body'] span[style*='-
 body.vscode-high-contrast-light .md [data-streamdown='code-block-body'] span[style*='--sdm-c'] { color: inherit; }
 
 /* Narrow sidebars: never scroll sideways; the mode pill keeps only its icon below ~330px. */
-.app, .dock { overflow-x: hidden; }
+/* clip, not hidden: `hidden` turns the element into a scroll container that also clips vertically,
+   which cut off the / and @ menus that open above the input. */
+.app, .dock { overflow-x: clip; }
+.dock { position: relative; z-index: 5; }
 .composer { container-type: inline-size; }
 .toolbar { min-width: 0; }
 .toolbar .pill { min-width: 0; flex-shrink: 1; }

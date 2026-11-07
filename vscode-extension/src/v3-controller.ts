@@ -11,6 +11,7 @@ import { normalizeMode } from './run-args';
 import { buildPrompt, extraDirs, titleFrom } from './prompt';
 import { CheckpointStore } from './checkpoints';
 import { EditReview } from './edit-review';
+import { ActiveRun, withoutLiveTurn } from './live-runs';
 import type {
   ChatMode, Chip, EditInfo, FileItem, HostMessage, InitState, ProviderGroup, SessionRow, SettingsState, SettingsValues,
   StreamEvent, ToolInfo, TranscriptMessage, WebviewMessage,
@@ -30,7 +31,19 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
 /** Shared across all open v3 webviews so a rename in one shows everywhere. */
 class Hub {
   readonly controllers = new Set<V3Controller>();
+  readonly runs = new Set<ActiveRun>();
+  private runCounter = 0;
   liveModels: Record<string, string[] | undefined> = {};
+  nextRunId(): string { return `r${++this.runCounter}`; }
+  runFor(sessionId: string | null): ActiveRun | undefined {
+    if (!sessionId) return undefined;
+    for (const r of this.runs) if (r.sessionId === sessionId) return r;
+    return undefined;
+  }
+  /** Attach every idle view that shows this run's session. */
+  attachViewers(run: ActiveRun): void {
+    for (const c of this.controllers) if (c.currentSessionId === run.sessionId && !c.viewing) c.view(run);
+  }
   broadcast(build: () => Promise<HostMessage> | HostMessage): void {
     void Promise.resolve(build()).then((msg) => { for (const c of this.controllers) c.post(msg); }, () => {});
   }
@@ -38,14 +51,13 @@ class Hub {
 export const hub = new Hub();
 
 export class V3Controller implements vscode.Disposable {
-  private run: StreamRun | null = null;
-  private runId = 0;
+  /** The run this view shows, if any (see ActiveRun). */
+  private active: ActiveRun | null = null;
   private sessionId: string | null;
   private mode: ChatMode;
   private model: string;
   private readonly disposables: vscode.Disposable[] = [];
   private ready = false;
-  private pendingDirs: string[] = [];
   private readonly queue: HostMessage[] = [];
 
   constructor(
@@ -70,11 +82,27 @@ export class V3Controller implements vscode.Disposable {
 
   dispose(): void {
     hub.controllers.delete(this);
-    this.run?.cancel();
+    this.leaveRun();
     for (const d of this.disposables) d.dispose();
   }
 
   get currentSessionId(): string | null { return this.sessionId; }
+  get viewing(): ActiveRun | null { return this.active; }
+
+  /** Show a run (live, with what happened so far). */
+  view(run: ActiveRun): void {
+    this.active = run;
+    run.attach(this);
+  }
+
+  /** Called by the run when it ends. */
+  runEnded(run: ActiveRun): void { if (this.active === run) this.active = null; }
+
+  private leaveRun(): void {
+    const run = this.active;
+    this.active = null;
+    run?.detach(this);
+  }
 
   post(msg: HostMessage): void {
     if (!this.ready && msg.type !== 'init') { this.queue.push(msg); return; }
@@ -88,7 +116,7 @@ export class V3Controller implements vscode.Disposable {
   open(view: 'settings' | 'memory' | 'tools' | 'sessions' | 'model'): void { this.post({ type: 'open', view }); }
   focusInput(): void { this.post({ type: 'focusInput' }); }
   newChat(): void {
-    if (this.run?.running) this.run.cancel();
+    this.leaveRun();
     this.sessionId = null;
     this.post({ type: 'newChat' });
     this.onTitle?.('Solvra');
@@ -107,8 +135,14 @@ export class V3Controller implements vscode.Disposable {
         return;
       }
       case 'send': return this.send(m.text, m.chips, normalizeMode(m.mode), m.model || this.model);
-      case 'cancel': this.run?.cancel(); return;
-      case 'permission': this.run?.respond(m.id, m.decision, m.message); return;
+      case 'cancel': this.active?.run?.cancel(); return;
+      case 'permission': {
+        const run = this.active;
+        if (!run?.run) return;
+        run.run.respond(m.id, m.decision, m.message);
+        run.emit({ type: 'approvalAnswered', runId: run.id, id: m.id, decision: m.decision });
+        return;
+      }
       case 'newChat': this.newChat(); return;
       case 'openSession': return this.loadSession(m.id);
       case 'refreshSessions': this.post({ type: 'sessions', sessions: await listSessions(this.s) }); return;
@@ -205,29 +239,36 @@ export class V3Controller implements vscode.Disposable {
   }
 
   private async send(text: string, chips: Chip[], mode: ChatMode, model: string): Promise<void> {
-    if (this.run?.running) return;
+    // One run per session at a time, whichever view it was started from.
+    if (this.active || hub.runFor(this.sessionId)) return;
     const prompt = buildPrompt(text, chips, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
     if (!prompt.trim()) return;
     this.mode = mode;
     this.model = qualifyModel(model);
-    const id = `r${++this.runId}`;
-    this.post({ type: 'runStarted', runId: id, text, chips });
+    const id = hub.nextRunId();
+    const active = new ActiveRun(id, prompt, { type: 'runStarted', runId: id, text, chips, startedAt: Date.now() }, this.sessionId);
+    hub.runs.add(active);
+    this.view(active);
+    hub.attachViewers(active);
+    const emit = (event: StreamEvent) => active.emit({ type: 'stream', runId: id, event });
+    const finish = (exitCode: number | null) => {
+      active.emit({ type: 'runEnded', runId: id, exitCode });
+      hub.runs.delete(active);
+      for (const v of active.viewers) v.runEnded(active);
+      hub.broadcast(async () => ({ type: 'sessions', sessions: await listSessions(this.s) }));
+    };
 
     // Preflight: say what is missing, with a button that fixes it, before starting a process.
     const { provider } = splitModel(this.model);
     const preflight = await this.preflight(provider);
-    if (preflight) {
-      this.post({ type: 'stream', runId: id, event: preflight });
-      this.post({ type: 'runEnded', runId: id, exitCode: null });
-      return;
-    }
+    if (preflight) { emit(preflight); finish(null); return; }
 
     let invocation: { command: string; prefix: string[] };
     try {
       invocation = this.s.runner.resolveInvocation();
     } catch (e) {
-      this.post({ type: 'stream', runId: id, event: { type: 'error', message: errorText(e), fix: 'set_executable' } });
-      this.post({ type: 'runEnded', runId: id, exitCode: null });
+      emit({ type: 'error', message: errorText(e), fix: 'set_executable' });
+      finish(null);
       return;
     }
 
@@ -239,7 +280,7 @@ export class V3Controller implements vscode.Disposable {
     const rules = this.sessionId ? this.s.context.workspaceState.get<string[]>(rulesKey(this.sessionId), []) : [];
     const remembered = this.sessionId ? this.s.context.workspaceState.get<string[]>(dirsKey(this.sessionId), []) : [];
     const addDirs = [...new Set([...extraDirs(chips, cwd, roots), ...remembered])];
-    this.pendingDirs = addDirs.filter((d) => !roots.includes(d));
+    const newDirs = addDirs.filter((d) => !roots.includes(d));
     let sawDone = false;
     const run = new StreamRun({
       command: invocation.command,
@@ -257,52 +298,54 @@ export class V3Controller implements vscode.Disposable {
       allowRules: rules,
       addDirs,
       checkpointDir: this.s.checkpoints.dir,
-    }, (event) => this.onEvent(id, event, () => { sawDone = true; }), (line) => this.s.output.appendLine(line));
-    this.run = run;
+    }, (event) => { if (event.type === 'done') sawDone = true; this.onRunEvent(active, event, newDirs); }, (line) => this.s.output.appendLine(line));
+    active.run = run;
     let code: number | null = null;
     try {
       code = await run.start();
     } catch (e) {
       const enoent = (e as NodeJS.ErrnoException)?.code === 'ENOENT';
-      this.post({
-        type: 'stream', runId: id, event: {
-          type: 'error',
-          message: enoent ? `Could not start ${invocation.command}. Solvra needs the .NET 8 runtime.` : `Could not start Solvra: ${errorText(e)}`,
-          fix: enoent ? 'install_dotnet' : 'set_executable',
-        },
+      emit({
+        type: 'error',
+        message: enoent ? `Could not start ${invocation.command}. Solvra needs the .NET 8 runtime.` : `Could not start Solvra: ${errorText(e)}`,
+        fix: enoent ? 'install_dotnet' : 'set_executable',
       });
     }
     if (!sawDone && code !== null && code !== 0 && code !== 130) {
       const tail = run.stderrText.trim().split('\n').slice(-3).join('\n');
-      this.post({ type: 'stream', runId: id, event: { type: 'error', message: tail || `Solvra exited with code ${code}.`, fix: /api key|unauthor|401|403/i.test(tail) ? 'add_api_key' : null, provider } });
+      emit({ type: 'error', message: tail || `Solvra exited with code ${code}.`, fix: /api key|unauthor|401|403/i.test(tail) ? 'add_api_key' : null, provider });
     }
-    this.run = null;
-    this.post({ type: 'runEnded', runId: id, exitCode: code });
-    hub.broadcast(async () => ({ type: 'sessions', sessions: await listSessions(this.s) }));
+    finish(code);
   }
 
-  private onEvent(runId: string, event: StreamEvent, done: () => void): void {
+  /** Session bookkeeping for a run's events, then the event goes to every view of the run. */
+  private onRunEvent(active: ActiveRun, event: StreamEvent, newDirs: string[]): void {
     if (event.type === 'session' && event.id) {
-      this.sessionId = event.id;
-      this.onTitle?.(event.title);
-      if (this.pendingDirs.length) {
+      active.sessionId = event.id;
+      for (const v of active.viewers) v.adoptSession(event.id, event.title);
+      hub.attachViewers(active);
+      if (newDirs.length) {
         const key = dirsKey(event.id);
         const known = this.s.context.workspaceState.get<string[]>(key, []);
-        void this.s.context.workspaceState.update(key, [...new Set([...known, ...this.pendingDirs])]);
+        void this.s.context.workspaceState.update(key, [...new Set([...known, ...newDirs])]);
       }
     } else if (event.type === 'tool_result' && event.checkpoint) {
-      this.s.checkpoints.record(event.id, this.sessionId, event.checkpoint.file, event.checkpoint.before);
-      this.post({ type: 'stream', runId, event });
-      this.post({ type: 'edits', edits: this.editInfo([event.id]) });
+      this.s.checkpoints.record(event.id, active.sessionId, event.checkpoint.file, event.checkpoint.before);
+      active.emit({ type: 'stream', runId: active.id, event });
+      active.emit({ type: 'edits', edits: this.editInfo([event.id]) });
       return;
-    } else if (event.type === 'permission_rule' && this.sessionId) {
-      const key = rulesKey(this.sessionId);
+    } else if (event.type === 'permission_rule' && active.sessionId) {
+      const key = rulesKey(active.sessionId);
       const rules = this.s.context.workspaceState.get<string[]>(key, []);
       if (!rules.includes(event.rule)) void this.s.context.workspaceState.update(key, [...rules, event.rule]);
-    } else if (event.type === 'done') {
-      done();
     }
-    this.post({ type: 'stream', runId, event });
+    active.emit({ type: 'stream', runId: active.id, event });
+  }
+
+  /** The run this view shows got its session id (a new chat). */
+  adoptSession(id: string, title: string): void {
+    this.sessionId = id;
+    this.onTitle?.(title);
   }
 
   private async preflight(provider: string | undefined): Promise<StreamEvent | null> {
@@ -318,14 +361,19 @@ export class V3Controller implements vscode.Disposable {
   }
 
   private async loadSession(id: string): Promise<void> {
-    if (this.run?.running) this.run.cancel();
+    if (this.active && this.active.sessionId === id) return; // already showing it live
+    this.leaveRun();
     const out = await this.cli(['session', 'show', id, '--json']);
     try {
       const d = JSON.parse(out) as { id: string; title: string; messages: TranscriptMessage[] };
       this.sessionId = d.id;
-      this.post({ type: 'sessionLoaded', id: d.id, title: d.title, messages: d.messages });
+      // A run still working on this session: show the saved part, then the current turn live.
+      const live = hub.runFor(d.id);
+      const messages = live ? withoutLiveTurn(d.messages, live.prompt) : d.messages;
+      this.post({ type: 'sessionLoaded', id: d.id, title: d.title, messages });
       this.post({ type: 'edits', edits: this.s.checkpoints.forSession(d.id) });
       this.onTitle?.(d.title);
+      if (live) this.view(live);
     } catch {
       this.post({ type: 'hostError', message: 'That session could not be opened. It may have been deleted.' });
     }
