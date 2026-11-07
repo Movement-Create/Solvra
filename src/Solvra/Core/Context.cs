@@ -400,5 +400,8 @@ Verification discipline:
         7. Never run destructive commands on data outside the task (deleting home or system paths, force
            pushes, resetting uncommitted work). Don't expose secrets in output.
         8. Finish with a brief summary: what changed (files), how it was verified, and anything left open.
+        9. Before choosing between approaches, or when you are not sure, record it with the decide tool
+           (question, options, choice, confidence, evidence call ids), then act on the choice.
+        10. After each check in step 4, record its result with the verify tool (check, passed, attempt).
         """;
 }

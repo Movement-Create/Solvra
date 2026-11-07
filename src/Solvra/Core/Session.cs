@@ -162,6 +162,17 @@ public sealed class SessionManager
         });
     }
 
+    /// <summary>End-of-run record: trace id, stop reason, usage, decisions, verifications and written files.</summary>
+    public async Task LogRunEndAsync(SessionConfig session, object data)
+    {
+        await AppendEventAsync(session, new SessionEvent
+        {
+            Type = "run_end",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            Data = JsonSerializer.SerializeToElement(data, JsonOptions)
+        });
+    }
+
     public async Task LogResultAsync(SessionConfig session, AgentRunResult result)
     {
         var data = JsonSerializer.SerializeToElement(new

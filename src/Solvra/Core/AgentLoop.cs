@@ -62,6 +62,10 @@ public sealed class AgentLoop
         public string? ActiveOperationType;
         public bool DeadlineWarningSent;
         public List<Message> Messages = [];
+        public string? TraceId;
+        public int Decisions;
+        public readonly List<object> Verifications = [];
+        public readonly List<object> Artifacts = [];
     }
 
     public async Task<AgentRunResult> RunAsync(AgentRunOptions options, CancellationToken ct = default)
@@ -102,7 +106,7 @@ public sealed class AgentLoop
                 turns = progress.Turns,
                 usage = new { input = progress.Usage.InputTokens, output = progress.Usage.OutputTokens }
             }, options.Session.Id);
-            await LogSessionEnd(options.Session.Id, progress.Turns, cost, "Deadline");
+            await LogSessionEnd(options, progress, progress.Turns, progress.Usage, cost, "Deadline");
             options.OnText?.Invoke("\n" + note + "\n");
             return BuildResult(Join(progress.LastText, note), progress.Turns, progress.Usage, cost,
                 StopReason.Deadline, progress.Messages);
@@ -133,7 +137,7 @@ public sealed class AgentLoop
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return await FailAsync(options, sessionId, messages, "", 0, new TokenUsage(), 0m, $"Cannot use model '{options.Session.Model}': {ex.Message}");
+            return await FailAsync(options, progress, sessionId, messages, "", 0, new TokenUsage(), 0m, $"Cannot use model '{options.Session.Model}': {ex.Message}");
         }
 
         var permissionMode = Enum.TryParse<PermissionMode>(options.Session.PermissionMode, true, out var pm)
@@ -162,6 +166,7 @@ public sealed class AgentLoop
             ["model"] = resolvedModel,
             ["provider"] = provider.Id
         });
+        progress.TraceId = _tracer.CurrentSpan?.TraceId;
 
         while (options.Session.MaxTurns == 0 || turns < options.Session.MaxTurns)
         {
@@ -254,7 +259,7 @@ public sealed class AgentLoop
                 progress.ActiveOperationId = null;
                 progress.ActiveOperationType = null;
                 var cost = provider.EstimateCost(resolvedModel, totalUsage.InputTokens, totalUsage.OutputTokens);
-                return await FailAsync(options, sessionId, messages, lastText, turns, totalUsage, cost, ex.Message, provider, resolvedModel);
+                return await FailAsync(options, progress, sessionId, messages, lastText, turns, totalUsage, cost, ex.Message, provider, resolvedModel);
             }
 
             // Some OpenAI-compatible servers report no usage; estimate rather than record zero.
@@ -332,13 +337,13 @@ public sealed class AgentLoop
 
                 await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, currentCost);
                 if (!options.NoTools) await _hookEngine.FireStopAsync(sessionId, turns, lastText);
-                await LogSessionEnd(sessionId, turns, currentCost, "Text");
+                await LogSessionEnd(options, progress, turns, totalUsage, currentCost, "Text");
                 return BuildResult(lastText, turns, totalUsage, currentCost, StopReason.Text, messages);
             }
             lengthContinuations = 0;
 
             if (options.NoTools)
-                return await FailAsync(options, sessionId, messages, lastText, turns, totalUsage, currentCost,
+                return await FailAsync(options, progress, sessionId, messages, lastText, turns, totalUsage, currentCost,
                     "The provider returned a tool call even though tools are disabled.", provider, resolvedModel);
 
             foreach (var tc in response.ToolCalls)
@@ -377,7 +382,7 @@ public sealed class AgentLoop
             if (options.Session.MaxBudgetUsd > 0 && currentCost > options.Session.MaxBudgetUsd)
             {
                 await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, currentCost);
-                await LogSessionEnd(sessionId, turns, currentCost, "MaxBudget");
+                await LogSessionEnd(options, progress, turns, totalUsage, currentCost, "MaxBudget");
                 var note = $"[Stopped: estimated cost ${currentCost:F2} exceeded the ${options.Session.MaxBudgetUsd:F2} budget. Raise it with --max-budget or SOLVRA_MAX_BUDGET.]";
                 options.OnText?.Invoke("\n" + note + "\n");
                 return BuildResult(Join(lastText, note), turns, totalUsage, currentCost, StopReason.MaxBudget, messages);
@@ -386,7 +391,7 @@ public sealed class AgentLoop
 
         var finalCost = provider.EstimateCost(resolvedModel, totalUsage.InputTokens, totalUsage.OutputTokens);
         await RecordCostAsync(options.Session, resolvedModel, provider, totalUsage, turns, finalCost);
-        await LogSessionEnd(sessionId, turns, finalCost, "MaxTurns");
+        await LogSessionEnd(options, progress, turns, totalUsage, finalCost, "MaxTurns");
         var turnsNote = $"[Stopped after reaching the turn limit ({options.Session.MaxTurns}). Continue the session or raise --max-turns.]";
         options.OnText?.Invoke("\n" + turnsNote + "\n");
         return BuildResult(Join(lastText, turnsNote), turns, totalUsage, finalCost, StopReason.MaxTurns, messages);
@@ -595,6 +600,12 @@ public sealed class AgentLoop
                     MaxTurns = options.Session.MaxTurns,
                 };
 
+                string? artifactPath = null, shaBefore = null;
+                if (tc.Name is "file_write" or "file_edit" && effectiveInput.TryGetProperty("path", out var pathEl) && pathEl.ValueKind == JsonValueKind.String)
+                {
+                    try { artifactPath = Path.GetFullPath(pathEl.GetString()!, cwd); shaBefore = FileSha256(artifactPath); } catch { artifactPath = null; }
+                }
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 progress.ActiveOperationId = tc.Id;
                 progress.ActiveOperationType = "tool_call";
@@ -624,6 +635,7 @@ public sealed class AgentLoop
                 var post = await _hookEngine.FirePostToolUseAsync(sessionId, turn, hookInfo, new ToolResultInfo(result.Output, result.IsError));
                 if (post.ModifiedOutput != null)
                     result = result with { Output = post.ModifiedOutput };
+                RecordOutcome(progress, tc, artifactPath, shaBefore, result);
             }
         }
 
@@ -656,7 +668,7 @@ public sealed class AgentLoop
         maxTurns == 0 || completedTurns < maxTurns;
 
     private async Task<AgentRunResult> FailAsync(
-        AgentRunOptions options, string sessionId, List<Message> messages, string lastText, int turns,
+        AgentRunOptions options, RunProgress progress, string sessionId, List<Message> messages, string lastText, int turns,
         TokenUsage usage, decimal cost, string error, IProvider? provider = null, string? model = null)
     {
         var note = $"[Error: {error}]";
@@ -668,7 +680,7 @@ public sealed class AgentLoop
             await SafeLog(() => _sessionManager.LogAssistantMessageAsync(options.Session, Join(lastText, note)));
         if (provider != null && model != null)
             await RecordCostAsync(options.Session, model, provider, usage, turns, cost);
-        await LogSessionEnd(sessionId, turns, cost, "Error");
+        await LogSessionEnd(options, progress, turns, usage, cost, "Error");
         return BuildResult(Join(lastText, note), turns, usage, cost, StopReason.Error, messages) with { Error = error };
     }
 
@@ -683,9 +695,67 @@ public sealed class AgentLoop
         catch (Exception ex) { Console.Error.WriteLine($"[session] could not write session log: {ex.Message}"); }
     }
 
-    private async Task LogSessionEnd(string sessionId, int turns, decimal costUsd, string stopReason)
+    private async Task LogSessionEnd(AgentRunOptions options, RunProgress progress, int turns, TokenUsage usage, decimal costUsd, string stopReason)
     {
-        await _auditLogger.LogAsync("SessionEnd", new { sessionId, turns, costUsd, stopReason }, sessionId);
+        var sessionId = options.Session.Id;
+        object[] verifications, artifacts;
+        lock (progress) { verifications = progress.Verifications.ToArray(); artifacts = progress.Artifacts.ToArray(); }
+        await _auditLogger.LogAsync("SessionEnd", new
+        {
+            sessionId, turns, costUsd, stopReason,
+            traceId = progress.TraceId, decisions = progress.Decisions, verifications = verifications.Length, artifacts = artifacts.Length
+        }, sessionId);
+        if (options.LogToSession)
+            await SafeLog(() => _sessionManager.LogRunEndAsync(options.Session, new
+            {
+                trace_id = progress.TraceId,
+                stop_reason = stopReason.ToLowerInvariant(),
+                turns,
+                usage = new { input = usage.InputTokens, output = usage.OutputTokens },
+                cost_usd = costUsd,
+                // A zero cost with tokens spent means the provider has no price table, not a free run.
+                cost_known = costUsd > 0 || usage.InputTokens + usage.OutputTokens == 0,
+                decisions = progress.Decisions,
+                verifications,
+                artifacts
+            }));
+    }
+
+    private static string? FileSha256(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Feed the run-end record: decisions, verification results and files written by this call.</summary>
+    private static void RecordOutcome(RunProgress progress, ToolCall tc, string? artifactPath, string? shaBefore, ToolExecuteResult result)
+    {
+        if (artifactPath != null)
+            lock (progress) progress.Artifacts.Add(new { path = artifactPath, sha256_before = shaBefore, sha256_after = FileSha256(artifactPath), call_id = tc.Id, is_error = result.IsError });
+        if (result.IsError) return;
+        if (tc.Name == "decide") Interlocked.Increment(ref progress.Decisions);
+        if (tc.Name == "verify")
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(result.Output);
+                var r = doc.RootElement;
+                var entry = new
+                {
+                    check = r.TryGetProperty("check", out var c) ? c.GetString() : null,
+                    passed = r.TryGetProperty("passed", out var p) && p.ValueKind == JsonValueKind.True,
+                    attempt = r.TryGetProperty("attempt", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetInt32() : 1,
+                    call_id = tc.Id
+                };
+                lock (progress) progress.Verifications.Add(entry);
+            }
+            catch (JsonException) { }
+        }
     }
 
     private static AgentRunResult BuildResult(

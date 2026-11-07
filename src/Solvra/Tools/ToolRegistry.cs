@@ -196,6 +196,8 @@ public class ToolRegistry : IToolRegistry
         RegisterTool(new MemoryNoteTool());
         RegisterTool(new MemoryRecallTool());
         RegisterTool(new TodoTool());
+        RegisterTool(new DecideTool());
+        RegisterTool(new VerifyTool());
         RegisterTool(new AgentTool());
     }
 }
