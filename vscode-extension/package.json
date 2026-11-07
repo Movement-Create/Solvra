@@ -132,8 +132,8 @@
         },
         "solvra.autoApprove": {
           "type": "boolean",
-          "default": true,
-          "description": "Auto-approve tool permissions"
+          "default": false,
+          "description": "Start new chats in Auto mode (edits and commands run without asking). When off, chats start in Ask mode, which never edits or runs anything without approval."
         },
         "solvra.googleApiKey": {
           "type": "string",
@@ -197,6 +197,7 @@
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
+    "test": "npm run compile-tests && node --test test/*.test.js",
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {

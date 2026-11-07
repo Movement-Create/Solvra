@@ -3,6 +3,7 @@ import { AgentRunner } from './agent-runner';
 import { SolvraStatusBar } from './status-bar';
 import { SessionsProvider } from './sessions-provider';
 import { getChatHtml, UiVersion } from './chat-html';
+import { APPROVAL_NEEDED_NOTICE, ChatMode, normalizeMode } from './run-args';
 
 /**
  * Manages editor-tab-based session panels (as opposed to the sidebar chat).
@@ -111,11 +112,13 @@ export class SessionPanelManager {
   private _setupPanelHandlers(panel: vscode.WebviewPanel, sessionId: string): void {
     const history: { role: 'user' | 'assistant'; text: string }[] = [];
     const pendingFiles = new Map<string, { relative: string; content: string }>();
+    // Undefined until the webview reports its mode; the runner then uses the settings default.
+    const state: { mode?: ChatMode } = {};
 
     panel.webview.onDidReceiveMessage(async (message) => {
       switch (message.type) {
         case 'sendMessage':
-          await this._handlePanelMessage(panel, sessionId, message.text, history, pendingFiles);
+          await this._handlePanelMessage(panel, sessionId, message.text, history, pendingFiles, state.mode);
           break;
         case 'cancel':
           this._runner.cancel();
@@ -151,7 +154,7 @@ export class SessionPanelManager {
           break;
         }
         case 'setMode':
-          // UI-only — no 'mode' concept in AgentRunner yet.
+          state.mode = normalizeMode(message.value);
           break;
         case 'pickModel':
           vscode.commands.executeCommand('solvra.pickModel');
@@ -161,6 +164,7 @@ export class SessionPanelManager {
           panel.webview.postMessage({
             type: 'initPills',
             model: cfg.get<string>('model', 'gemini-2.5-flash'),
+            mode: cfg.get<boolean>('autoApprove', false) ? 'auto' : 'ask',
           });
           break;
         }
@@ -258,7 +262,8 @@ export class SessionPanelManager {
     sessionId: string,
     text: string,
     history: { role: 'user' | 'assistant'; text: string }[],
-    pendingFiles: Map<string, { relative: string; content: string }>
+    pendingFiles: Map<string, { relative: string; content: string }>,
+    mode?: ChatMode
   ): Promise<void> {
     if (!text.trim()) return;
 
@@ -291,6 +296,7 @@ export class SessionPanelManager {
       const result = await this._runner.run({
         prompt,
         sessionId,
+        mode,
         onChunk: (chunk: string) => {
           streamed += chunk;
           panel.webview.postMessage({ type: 'streamChunk', text: chunk });
@@ -306,6 +312,9 @@ export class SessionPanelManager {
         panel.webview.postMessage({ type: 'addAssistantMessage', text: result.text });
       } else {
         panel.webview.postMessage({ type: 'streamEnd' });
+      }
+      if (result.approvalNeeded?.length) {
+        panel.webview.postMessage({ type: 'addAssistantMessage', text: APPROVAL_NEEDED_NOTICE });
       }
 
       this._statusBar.setIdle();

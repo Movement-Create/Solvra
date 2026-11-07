@@ -94,6 +94,13 @@ public static class Program
         var ephemeralOption = new Option<bool>("--ephemeral", "Do not persist a transcript");
         var noToolsOption = new Option<bool>("--no-tools", "Generation-only mode without tools, hooks, skills, memory or project instructions");
         var askAllOption = new Option<bool>("--ask-all", "Ask before every action except local workspace reads");
+        var permissionModeOption = new Option<string?>("--permission-mode", "Permission mode: default (ask before edits), ask-all, plan or auto. Overrides --auto, --ask-all and the config; --plan still wins");
+        permissionModeOption.AddValidator(r =>
+        {
+            var value = r.GetValueOrDefault<string?>();
+            if (value is not null && AgentHost.ParsePermissionMode(value) is null)
+                r.ErrorMessage = $"Invalid permission mode '{value}'. Expected default, ask-all, plan or auto.";
+        });
         var timeLimitOption = new Option<int?>("--time-limit-seconds", "Hard elapsed-time limit for this run (tools and subagents inherit it)");
         var modelTimeoutOption = new Option<int?>("--model-timeout-seconds", "Timeout for one model request; 0 disables it (default from config, 1800)");
 
@@ -101,7 +108,7 @@ public static class Program
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption })
+                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption, permissionModeOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -121,6 +128,9 @@ public static class Program
             var config = await ConfigLoader.LoadAsync();
             if (p.GetValueForOption(reflectOption) is bool reflect) config = config with { Reflection = reflect };
             if (p.GetValueForOption(modelTimeoutOption) is int modelTimeout) config = config with { ModelTimeoutSeconds = modelTimeout };
+            var permissionMode = AgentHost.ResolvePermissionMode(p.GetValueForOption(permissionModeOption), plan, auto, askAll, config.PermissionMode);
+            plan = permissionMode == "plan";
+            auto = permissionMode == "auto";
             config = ApplySubagentOptions(config, p.GetValueForOption(subagentsOption), p.GetValueForOption(subagentModelOption), p.GetValueForOption(subagentEffortOption));
             var effort = p.GetValueForOption(effortOption) is { } e ? EffortLevelExtensions.Parse(e) : config.ParsedEffort;
             var (provider, model) = AgentHost.ResolveTarget(config, p.GetValueForOption(providerOption), p.GetValueForOption(modelOption), effort);
@@ -134,7 +144,7 @@ public static class Program
                 Title = prompt.Length > 80 ? prompt[..80] : prompt,
                 Model = model,
                 Provider = provider,
-                PermissionMode = plan ? "plan" : (auto ? "auto" : askAll ? "askall" : config.PermissionMode),
+                PermissionMode = permissionMode,
                 Effort = effort,
                 MaxTurns = p.GetValueForOption(maxTurnsOption) ?? config.MaxTurns,
                 MaxBudgetUsd = p.GetValueForOption(maxBudgetOption) ?? config.MaxBudgetUsd,
@@ -175,8 +185,14 @@ public static class Program
             if (ephemeral) sessionConfig = sessionConfig with { FilePath = "" };
 
             var canPrompt = !Console.IsInputRedirected && prompt != "-";
-            if (!auto && !plan && !canPrompt && config.PermissionMode is not ("auto" or "bypasspermissions"))
+            var approver = auto || !canPrompt ? null : (Func<ToolCall, Task<bool>>)AgentHost.AskOnConsole;
+            if (!canPrompt && permissionMode is not ("auto" or "bypasspermissions" or "plan"))
                 Console.Error.WriteLine("[warning] No terminal to ask for approval: write/exec/agent tools will be refused. Use --auto to allow them.");
+            // Without an approver, say on stderr which tools were refused so callers such as the
+            // VS Code extension can explain it; stdout (text or --json) is unchanged.
+            var (onRefusalCall, onRefusalResult) = approver is null
+                ? AgentHost.ApprovalNeededReporter(Console.Error)
+                : ((Action<ToolCall>?)null, (Action<ToolResult>?)null);
 
             var result = await s.CreateReflection().RunAgentWithReflectionAsync(new AgentRunOptions
             {
@@ -186,7 +202,9 @@ public static class Program
                 SystemPrompt = null,
                 Streaming = !outputJson,
                 OnText = outputJson ? null : text => Console.Write(text),
-                OnPermissionRequest = auto || !canPrompt ? null : AgentHost.AskOnConsole,
+                OnPermissionRequest = approver,
+                OnToolCall = onRefusalCall,
+                OnToolResult = onRefusalResult,
                 SubagentsEnabled = config.SubagentsEnabled,
                 SubagentModel = config.SubagentModel,
                 SubagentEffort = config.ParsedSubagentEffort,

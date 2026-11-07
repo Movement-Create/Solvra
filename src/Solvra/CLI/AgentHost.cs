@@ -142,6 +142,51 @@ public static class AgentHost
         return Task.FromResult(answer is "y" or "yes");
     }
 
+    /// <summary>Values accepted by <c>--permission-mode</c>, mapped to the session's stored mode.</summary>
+    public static string? ParsePermissionMode(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "default" or "ask" => "default",
+        "askall" or "ask-all" => "askall",
+        "plan" => "plan",
+        "auto" => "auto",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Effective permission mode for a run. <c>--plan</c> always wins (read-only is the safest
+    /// answer to a conflict); an explicit <c>--permission-mode</c> then beats <c>--auto</c>,
+    /// <c>--ask-all</c> and the config default, so a caller that pins "default" can never be
+    /// turned into auto by a <c>permission_mode</c> in the user's config.
+    /// </summary>
+    public static string ResolvePermissionMode(string? explicitMode, bool plan, bool auto, bool askAll, string configMode)
+    {
+        if (plan) return "plan";
+        if (ParsePermissionMode(explicitMode) is { } pinned) return pinned;
+        if (auto) return "auto";
+        if (askAll) return "askall";
+        return configMode;
+    }
+
+    /// <summary>Stderr marker for a tool refused because nobody could approve it. Parsed by the VS Code extension.</summary>
+    public const string ApprovalNeededMarker = "[solvra:approval-needed]";
+
+    /// <summary>
+    /// Tool hooks that write <see cref="ApprovalNeededMarker"/> lines to <paramref name="err"/> whenever a
+    /// tool is refused for lack of an approver, so a non-interactive caller can tell the user why.
+    /// </summary>
+    public static (Action<ToolCall> OnCall, Action<ToolResult> OnResult) ApprovalNeededReporter(TextWriter err)
+    {
+        var names = new System.Collections.Concurrent.ConcurrentDictionary<string, string>();
+        return (
+            tc => names[tc.Id] = tc.Name,
+            tr =>
+            {
+                if (!tr.IsError || !tr.Content.Contains(ToolRegistry.NoApproverPhrase, StringComparison.Ordinal)) return;
+                var name = names.TryRemove(tr.ToolUseId, out var n) ? n : "tool";
+                lock (err) err.WriteLine($"{ApprovalNeededMarker} {name}");
+            });
+    }
+
     /// <summary>Exit code: 0 done, 1 error, 2 turn limit, 3 budget limit, 4 deadline.</summary>
     public static int ExitCode(StopReason reason) => reason switch
     {

@@ -58,6 +58,10 @@ dotnet run --project src/Solvra -- chat
 --auto           Auto-approve all tool permissions
 --plan           Plan mode: only read-only tools run; the agent describes its changes
 --ask-all        Ask before writes, web access, commands, code, agents and other non-local reads
+--permission-mode default|ask-all|plan|auto
+                 Pin the permission mode (run only). Beats --auto, --ask-all and the config's
+                 permission_mode; --plan still wins. Without a terminal, every tool refused for
+                 lack of an approver is reported on stderr as "[solvra:approval-needed] <tool>".
 --no-tools       Generation-only mode: no tools, hooks, skills, memory or instruction files
 --ephemeral      Don't persist a conversation transcript
 --json           Output result as JSON (text, stop_reason, error, session_id, usage)

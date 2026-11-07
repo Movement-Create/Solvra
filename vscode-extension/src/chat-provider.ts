@@ -3,6 +3,7 @@ import { AgentRunner } from './agent-runner';
 import { SolvraStatusBar } from './status-bar';
 import { SessionsProvider } from './sessions-provider';
 import { getChatHtml, UiVersion } from './chat-html';
+import { APPROVAL_NEEDED_NOTICE, ChatMode, normalizeMode } from './run-args';
 
 export class SolvraChatProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'solvra.chatView';
@@ -11,6 +12,8 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
   private _sessionsProvider?: SessionsProvider;
   private _currentSessionId: string | null = null;
   private _isRunning = false;
+  /** Undefined until the webview reports its mode; the runner then uses the settings default. */
+  private _mode?: ChatMode;
   private _showThinking = false;
   private _history: { role: 'user' | 'assistant'; text: string }[] = [];
 
@@ -84,8 +87,8 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'setMode':
-          // UI-only for now — no 'mode' concept in AgentRunner. The webview
-          // persists the selection in localStorage.
+          // The webview persists the selection and re-sends it on load; every run uses it.
+          this._mode = normalizeMode(message.value);
           break;
         case 'pickModel':
           vscode.commands.executeCommand('solvra.pickModel');
@@ -95,6 +98,7 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
           this._postMessage({
             type: 'initPills',
             model: cfg.get<string>('model', 'gemini-2.5-flash'),
+            mode: cfg.get<boolean>('autoApprove', false) ? 'auto' : 'ask',
           });
           break;
         }
@@ -448,6 +452,7 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
       const result = await this._runner.run({
         prompt: promptWithHistory,
         sessionId: this._currentSessionId ?? undefined,
+        mode: this._mode,
         onChunk: (chunk: string) => {
           streamed += chunk;
           this._postMessage({ type: 'streamChunk', text: chunk });
@@ -463,6 +468,9 @@ export class SolvraChatProvider implements vscode.WebviewViewProvider {
         this._postMessage({ type: 'addAssistantMessage', text: result.text });
       } else {
         this._postMessage({ type: 'streamEnd' });
+      }
+      if (result.approvalNeeded?.length) {
+        this._postMessage({ type: 'addAssistantMessage', text: APPROVAL_NEEDED_NOTICE });
       }
 
       this._statusBar.setIdle();

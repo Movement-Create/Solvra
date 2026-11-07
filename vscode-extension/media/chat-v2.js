@@ -79,26 +79,45 @@
     });
   }
 
-  // ── 4. Mode pill cycles locally (no host picker exists yet) ─────────
-  const MODES = ['agent', 'ask', 'edit'];
+  // ── 4. Mode pill: Ask before edits → Plan only → Auto-approve ────────
+  // The host runs every message in the mode reported here. Older builds stored
+  // 'agent' / 'edit'; those are dropped so the pill falls back to the safe default.
+  const MODES = ['ask', 'plan', 'auto'];
+  const MODE_TEXT = {
+    ask:  { label: 'Ask',  title: 'Ask before edits: Solvra asks before it edits files or runs commands' },
+    plan: { label: 'Plan', title: 'Plan only: Solvra reads and plans but changes nothing' },
+    auto: { label: 'Auto', title: 'Auto-approve: Solvra edits files and runs commands without asking' },
+  };
   const modePill = $('#mode-pill');
   const modeLabelEl = modePill && modePill.querySelector('[data-mode-label]');
 
   const setModeLabel = (mode) => {
-    if (modeLabelEl && mode) modeLabelEl.textContent = mode;
+    const t = MODE_TEXT[mode];
+    if (!t) return;
+    if (modeLabelEl) modeLabelEl.textContent = t.label;
+    if (modePill) {
+      modePill.title = t.title + ' (click to switch)';
+      modePill.dataset.mode = mode;
+    }
   };
 
-  if (modePill && modeLabelEl) {
-    let current = localStorage.getItem('solvra.ui.mode') || MODES[0];
-    if (!MODES.includes(current)) current = MODES[0];
-    setModeLabel(current);
+  let currentMode = localStorage.getItem('solvra.ui.mode');
+  if (!MODES.includes(currentMode)) {
+    currentMode = null;
+    localStorage.removeItem('solvra.ui.mode');
+  }
+  const applyMode = (mode, persist) => {
+    currentMode = mode;
+    setModeLabel(mode);
+    if (persist) localStorage.setItem('solvra.ui.mode', mode);
+    post({ type: 'setMode', value: mode });
+  };
+  if (currentMode) applyMode(currentMode, false);
 
+  if (modePill && modeLabelEl) {
     modePill.addEventListener('click', () => {
-      const i = MODES.indexOf(current);
-      current = MODES[(i + 1) % MODES.length];
-      setModeLabel(current);
-      localStorage.setItem('solvra.ui.mode', current);
-      post({ type: 'setMode', value: current });
+      const i = MODES.indexOf(currentMode || 'ask');
+      applyMode(MODES[(i + 1) % MODES.length], true);
     });
   }
 
@@ -109,7 +128,8 @@
     switch (msg.type) {
       case 'initPills':
         if (msg.model) setModelLabel(msg.model);
-        if (msg.mode)  setModeLabel(msg.mode);
+        // The host's default only applies until the user picks a mode in this panel.
+        if (!currentMode && MODES.includes(msg.mode)) applyMode(msg.mode, false);
         break;
       case 'modelChanged':
         if (msg.value) setModelLabel(msg.value);
