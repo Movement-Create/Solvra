@@ -12,11 +12,18 @@ export function registerCommands(
   statusBar: SolvraStatusBar,
   outputChannel: vscode.OutputChannel,
   sessionsProvider: SessionsProvider,
-  sessionPanelManager: SessionPanelManager
+  sessionPanelManager: SessionPanelManager,
+  /** Handlers used instead when the v3 chat is active (in-panel UI, no pickers). */
+  overrides: Record<string, (...args: unknown[]) => unknown> = {},
+  isV3: () => boolean = () => false
 ): void {
   const register = (id: string, handler: (...args: unknown[]) => unknown) => {
-    context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+    const v3 = overrides[id] as ((...a: unknown[]) => unknown) | undefined;
+    context.subscriptions.push(vscode.commands.registerCommand(id, (...args: unknown[]) =>
+      v3 && isV3() ? v3(...args) : handler(...args)));
   };
+
+  register('solvra.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', 'solvra'));
 
   // ── Chat ────────────────────────────────────────────────────────────
   register('solvra.openChat', () => {

@@ -621,13 +621,20 @@ public static class Program
 
         var sessionShowArg = new Argument<string>("id", "Session ID to show");
         var sessionShowCommand = new Command("show", "Show session details") { sessionShowArg };
-        sessionShowCommand.SetHandler(async (id) =>
+        var sessionShowJsonOption = new Option<bool>("--json", "Output the transcript as JSON (for UIs)");
+        sessionShowCommand.AddOption(sessionShowJsonOption);
+        sessionShowCommand.SetHandler(async (string id, bool asJson) =>
         {
             var config = await ConfigLoader.LoadAsync();
             var mgr = new SessionManager(config.SessionsDir);
             try
             {
                 var info = await mgr.ResumeAsync(id);
+                if (asJson)
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(SessionTranscript.Build(info), StreamJsonRun.Json));
+                    return;
+                }
                 Console.WriteLine($"Session: {info.Config.Id}");
                 Console.WriteLine($"Model: {info.Config.Model}");
                 Console.WriteLine($"Created: {info.Config.CreatedAt}");
@@ -640,9 +647,10 @@ public static class Program
             }
             catch (FileNotFoundException)
             {
+                if (asJson) { Console.Error.WriteLine($"Session not found: {id}"); Environment.ExitCode = 1; return; }
                 Console.WriteLine($"Session not found: {id}");
             }
-        }, sessionShowArg);
+        }, sessionShowArg, sessionShowJsonOption);
 
 
         // --- solvra session resume <id> ---
@@ -737,16 +745,28 @@ public static class Program
 
         // --- solvra tools ---
         var toolsCmd = new Command("tools", "List all available tools");
-        toolsCmd.SetHandler(() =>
+        var toolsJsonOption = new Option<bool>("--json", "Output as JSON (name, description, kind)");
+        toolsCmd.AddOption(toolsJsonOption);
+        toolsCmd.SetHandler((bool asJson) =>
         {
             var sandbox = new SandboxManager(new SandboxConfig());
             var registry = new ToolRegistry();
             registry.RegisterBuiltins(sandbox);
             var defs = registry.GetToolDefinitions();
+            if (asJson)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(defs.Select(d => new
+                {
+                    name = d.Name,
+                    description = d.Description,
+                    kind = StreamJsonRun.KindOf(registry.GetTool(d.Name)),
+                }), StreamJsonRun.Json));
+                return;
+            }
             Console.WriteLine($"Available tools ({defs.Count}):\n");
             foreach (var d in defs)
                 Console.WriteLine($"  {d.Name,-25} {d.Description}");
-        });
+        }, toolsJsonOption);
 
         // --- solvra skills ---
         var skillsCmd = new Command("skills", "List discovered skills");

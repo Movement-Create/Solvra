@@ -81,9 +81,12 @@ const PROVIDER_ICON: Record<ModelOption['provider'], string> = {
 
 export function registerPickModel(
   context: vscode.ExtensionContext,
+  v3?: (...args: unknown[]) => unknown,
+  isV3: () => boolean = () => false,
   onChanged?: (id: string) => void
 ): void {
   const disposable = vscode.commands.registerCommand('solvra.pickModel', async () => {
+    if (v3 && isV3()) { await v3(); return; } // in-panel model picker
     const cfg = vscode.workspace.getConfiguration('solvra');
     const current = cfg.get<string>('model', 'claude-sonnet-4');
 
