@@ -10,6 +10,9 @@ namespace Solvra.Tools;
 
 public class ToolRegistry : IToolRegistry
 {
+    /// <summary>Stable phrase in the refusal returned when a tool needs approval and no approver exists.</summary>
+    public const string NoApproverPhrase = "and no one is available to approve it";
+
     private readonly Dictionary<string, ITool> _tools = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
     private readonly PermissionChecker _permissionChecker = new();
@@ -136,7 +139,7 @@ public class ToolRegistry : IToolRegistry
             var why = permissionMode == PermissionMode.Plan
                 ? $"Plan mode is read-only: \"{name}\" ({tool.PermissionLevel}) is not available. Describe the change you would make instead."
                 : permissionCallback == null
-                    ? $"Tool \"{name}\" needs approval ({tool.PermissionLevel}) and no one is available to approve it. Run with --auto to allow it."
+                    ? $"Tool \"{name}\" needs approval ({tool.PermissionLevel}) {NoApproverPhrase}. Run with --auto to allow it."
                     : $"The user denied \"{name}\". Do not retry the same call; ask or try a different approach.";
             return new ToolExecuteResult(why, true);
         }

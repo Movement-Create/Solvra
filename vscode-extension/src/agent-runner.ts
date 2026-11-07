@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { buildRunArgs, normalizeMode, parseApprovalNeeded } from './run-args';
 
 export interface RunResult {
   text: string;
@@ -11,6 +12,8 @@ export interface RunResult {
   cost_usd: number;
   stop_reason: string;
   messages: unknown[];
+  /** Tools the backend refused because nobody could approve them (ask mode). */
+  approvalNeeded?: string[];
 }
 
 export interface AgentRunOptions {
@@ -20,7 +23,6 @@ export interface AgentRunOptions {
   mode?: string;
   maxTurns?: number;
   maxBudget?: number;
-  auto?: boolean;
   onStdout?: (data: string) => void;
   onStderr?: (data: string) => void;
   onChunk?: (text: string) => void;
@@ -60,7 +62,7 @@ export class AgentRunner {
       provider: config.get<string>('provider', 'google'),
       model: config.get<string>('model', 'gemini-2.5-flash'),
       maxTurns: config.get<number>('maxTurns', 0),
-      autoApprove: config.get<boolean>('autoApprove', true),
+      autoApprove: config.get<boolean>('autoApprove', false),
       googleApiKey: config.get<string>('googleApiKey', ''),
       anthropicApiKey: config.get<string>('anthropicApiKey', ''),
       openaiApiKey: config.get<string>('openaiApiKey', ''),
@@ -255,8 +257,9 @@ export class AgentRunner {
     }
 
     const maxTurns = options.maxTurns ?? config.maxTurns;
-    const mode = options.mode || this._config.mode || 'auto';
-    const auto = options.auto !== undefined ? options.auto : config.autoApprove;
+    // The mode decides permissions. `solvra.autoApprove` only picks the default when the
+    // caller and the UI have not chosen one; unknown values fall back to the safe "ask".
+    const mode = normalizeMode(options.mode ?? this._config.mode, config.autoApprove ? 'auto' : 'ask');
 
     const { dotnet, dll } = this.resolveInvocation();
 
@@ -264,29 +267,15 @@ export class AgentRunner {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const cwd = workspaceFolder || os.homedir();
 
-    const args: string[] = [
+    const args = buildRunArgs({
       dll,
-      'run',
-      options.prompt,
-      '--provider', provider,
-      '--model', model,
-      '--max-turns', String(maxTurns),
-    ];
-
-    if (mode === 'plan') {
-      args.push('--plan');
-      args.push('--auto');
-    } else if (mode === 'auto' || auto) {
-      args.push('--auto');
-    } else {
-      // Solvra has no --allowed-tools CLI flag; permission rules are enforced
-      // via SessionConfig.AllowedTools loaded from solvra config. Fall back to --auto.
-      args.push('--auto');
-    }
-
-    if (options.sessionId) {
-      args.push('--session', options.sessionId);
-    }
+      prompt: options.prompt,
+      provider,
+      model,
+      maxTurns,
+      mode,
+      sessionId: options.sessionId,
+    });
 
     const env = this.buildEnv(provider);
 
@@ -362,6 +351,7 @@ export class AgentRunner {
         }
 
         const parsed = this._parseRunOutput(stdout);
+        parsed.approvalNeeded = parseApprovalNeeded(stderr);
 
         if (streamedText.trim() && (!parsed.text || parsed.text === '(no output)' || parsed.text.trimStart().startsWith('{'))) {
           parsed.text = streamedText.trim();

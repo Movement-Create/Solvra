@@ -135,7 +135,7 @@ function v2Html(p: {
       <div id="composer-pills">
         <button class="composer-pill accent" id="mode-pill" title="Switch mode" type="button">
           <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5l5.5 3.25v6.5L8 14.5 2.5 11.25v-6.5L8 1.5zM4 6.15v4.2L8 12.7l4-2.35v-4.2L8 3.8 4 6.15z"/></svg>
-          <span data-mode-label>agent</span>
+          <span data-mode-label>Ask</span>
           <span class="chev">▾</span>
         </button>
         <button class="composer-pill" id="model-pill" title="Switch model" type="button">
