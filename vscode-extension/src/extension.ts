@@ -9,6 +9,8 @@ import { registerPickModel } from './pick-model';
 import { KeyStore, migrateSettingsKeys } from './keys';
 import { isV3, registerSelectionFeed, v3CommandOverrides, V3ViewProvider } from './v3-surfaces';
 import type { V3Services } from './v3-controller';
+import { CheckpointStore } from './checkpoints';
+import { EditReview } from './edit-review';
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Solvra');
@@ -25,7 +27,10 @@ export function activate(context: vscode.ExtensionContext) {
   const statusBar = new SolvraStatusBar();
   context.subscriptions.push({ dispose: () => statusBar.dispose() });
   const runner = new AgentRunner(outputChannel, keys);
-  const services: V3Services = { context, runner, keys, output: outputChannel };
+  const checkpoints = new CheckpointStore(vscode.Uri.joinPath(context.globalStorageUri, 'checkpoints').fsPath);
+  const review = new EditReview(checkpoints);
+  context.subscriptions.push(review);
+  const services: V3Services = { context, runner, keys, output: outputChannel, checkpoints, review };
 
   // The chat view: v3 (default) or the legacy UIs. Switching between them needs a window reload.
   const v3AtStart = isV3();

@@ -83,6 +83,15 @@ export function App() {
               {state.turns.length === 0
                 ? <EmptyState onPick={(text) => dispatch({ type: 'prefill', text, send: false })} workspaceName={state.workspaceName} />
                 : <Transcript state={state} dispatch={dispatch} />}
+              {state.undoConflict && (
+                <div className="turn">
+                  <div className="confirm-inline warn" role="alertdialog">
+                    <span className="grow" dir="auto">{state.undoConflict.files.join(', ')} changed after Solvra edited {state.undoConflict.files.length === 1 ? 'it' : 'them'}. Undo anyway and lose those changes?</span>
+                    <button className="btn danger small" onClick={() => post({ type: 'undoEdits', toolIds: state.undoConflict!.toolIds, force: true })}>Undo anyway</button>
+                    <button className="btn ghost small" onClick={() => dispatch({ type: 'local/dismissConflict' })}>Cancel</button>
+                  </div>
+                </div>
+              )}
               {state.hostError && (
                 <div className="turn"><ErrorLine message={state.hostError.message} fix={state.hostError.fix ?? null} provider={state.hostError.provider} onDismiss={() => dispatch({ type: 'local/dismissHostError' })} onOpenSettings={() => go('settings')} /></div>
               )}

@@ -139,3 +139,26 @@ describe('sessions, chips and file refs', () => {
     expect(parseFileRef('npm install')).toBeNull();
   });
 });
+
+describe('checkpointed edits', () => {
+  it('tracks edit state and lists what a restore would undo', async () => {
+    const { editsFrom } = await import('./store');
+    let s = run([
+      { type: 'tool_call', agent: 'main', id: 'e1', name: 'file_edit', input: { path: 'a.js' }, summary: 'Edit a.js', kind: 'edit' },
+      { type: 'tool_result', agent: 'main', id: 'e1', ok: true, output: '', diff: '', meta: { added: 1, removed: 1, lines: 1 }, checkpoint: { file: '/w/a.js', before: '/c/e1.orig' } },
+    ]);
+    s = reducer(s, { type: 'edits', edits: { e1: { file: '/w/a.js', state: 'pending' } } });
+    s = reducer(s, { type: 'runEnded', runId: 'r1', exitCode: 0 });
+    s = reducer(s, { type: 'runStarted', runId: 'r2', text: 'more', chips: [] });
+    s = reducer(s, { type: 'stream', runId: 'r2', event: { type: 'tool_call', agent: 'main', id: 'e2', name: 'file_write', input: {}, summary: 'Write b.js', kind: 'edit' } });
+    s = reducer(s, { type: 'edits', edits: { e2: { file: '/w/b.js', state: 'pending' } } });
+    expect(editsFrom(s, 0)).toEqual(['e1', 'e2']);
+    expect(editsFrom(s, 1)).toEqual(['e2']);
+    s = reducer(s, { type: 'edits', edits: { e2: { file: '/w/b.js', state: 'undone' } } });
+    expect(editsFrom(s, 0)).toEqual(['e1']);
+    s = reducer(s, { type: 'undoConflict', toolIds: ['e1'], files: ['a.js'] });
+    expect(s.undoConflict?.files).toEqual(['a.js']);
+    s = reducer(s, { type: 'edits', edits: {} });
+    expect(s.undoConflict).toBeNull();
+  });
+});

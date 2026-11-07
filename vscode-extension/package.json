@@ -177,6 +177,18 @@
         "command": "solvra.openSettings",
         "title": "Settings",
         "category": "Solvra"
+      },
+      {
+        "command": "solvra.keepEdit",
+        "title": "Keep Solvra's Edit",
+        "category": "Solvra",
+        "icon": "$(check)"
+      },
+      {
+        "command": "solvra.undoEdit",
+        "title": "Undo Solvra's Edit",
+        "category": "Solvra",
+        "icon": "$(discard)"
       }
     ],
     "menus": {
@@ -222,6 +234,16 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "solvra.keepEdit",
+          "group": "navigation@1",
+          "when": "solvra.reviewingEdit"
+        },
+        {
+          "command": "solvra.undoEdit",
+          "group": "navigation@2",
+          "when": "solvra.reviewingEdit"
+        },
         {
           "command": "solvra.askSolvra",
           "group": "navigation",
@@ -319,6 +341,14 @@
         },
         {
           "command": "solvra.openSettings",
+          "when": "false"
+        },
+        {
+          "command": "solvra.keepEdit",
+          "when": "false"
+        },
+        {
+          "command": "solvra.undoEdit",
           "when": "false"
         }
       ]

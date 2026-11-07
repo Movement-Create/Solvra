@@ -108,6 +108,13 @@ public static class Program
                 if (StreamJsonRun.PermissionRule.Parse(rule) is null)
                     r.ErrorMessage = $"Invalid allow rule '{rule}'. Expected edit, agent, network, read or execute:<command>.";
         });
+        var addDirOption = new Option<string[]>("--add-dir", "Another folder the agent may work with (other workspace roots, data folders); repeatable") { AllowMultipleArgumentsPerToken = false };
+        addDirOption.AddValidator(r =>
+        {
+            foreach (var d in r.GetValueOrDefault<string[]>() ?? [])
+                if (!Directory.Exists(d)) r.ErrorMessage = $"--add-dir: folder not found: {d}";
+        });
+        var checkpointDirOption = new Option<string?>("--checkpoint-dir", "With stream-json: save each file's original before an edit here, for review and undo");
         var titleOption = new Option<string?>("--title", "Title for a new session (default: the first line of the prompt)");
         var permissionModeOption = new Option<string?>("--permission-mode", "Permission mode: default (ask before edits), ask-all, plan or auto. Overrides --auto, --ask-all and the config; --plan still wins");
         permissionModeOption.AddValidator(r =>
@@ -123,7 +130,7 @@ public static class Program
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption, permissionModeOption, outputFormatOption, allowRuleOption, titleOption })
+                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption, permissionModeOption, outputFormatOption, allowRuleOption, titleOption, addDirOption, checkpointDirOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
@@ -207,12 +214,13 @@ public static class Program
             }
             if (ephemeral) sessionConfig = sessionConfig with { FilePath = "" };
 
+            var addDirs = (p.GetValueForOption(addDirOption) ?? []).Select(d => Path.GetFullPath(d)).Distinct().ToList();
             if (streamJson)
             {
                 var rules = (p.GetValueForOption(allowRuleOption) ?? []).Select(StreamJsonRun.PermissionRule.Parse).OfType<StreamJsonRun.PermissionRule>();
                 context.ExitCode = await RunStreamJsonAsync(s, sessionMgr, sessionConfig, history, prompt, permissionMode, ephemeral, rules,
                     p.GetValueForOption(timeLimitOption) is > 0 and var limit ? TimeSpan.FromSeconds(limit) : null,
-                    p.GetValueForOption(noToolsOption), ct);
+                    p.GetValueForOption(noToolsOption), addDirs, p.GetValueForOption(checkpointDirOption), ct);
                 return;
             }
 
@@ -245,6 +253,7 @@ public static class Program
                     : null,
                 LogToSession = !ephemeral,
                 NoTools = p.GetValueForOption(noToolsOption),
+                AdditionalDirs = addDirs,
             }, ct);
 
             if (!ephemeral) await sessionMgr.LogResultAsync(sessionConfig, result);
@@ -800,13 +809,14 @@ public static class Program
     /// </summary>
     private static async Task<int> RunStreamJsonAsync(AgentSubsystems s, SessionManager sessionMgr, SessionConfig sessionConfig,
         List<Message> history, string prompt, string permissionMode, bool ephemeral, IEnumerable<StreamJsonRun.PermissionRule> rules,
-        TimeSpan? timeLimit, bool noTools, CancellationToken ct)
+        TimeSpan? timeLimit, bool noTools, IReadOnlyList<string> addDirs, string? checkpointDir, CancellationToken ct)
     {
         var config = s.Config;
         var cwd = Directory.GetCurrentDirectory();
         var stream = new StreamJsonRun(Console.Out, s.Registry, cwd, sessionConfig.Model, sessionConfig.Provider, rules)
         {
             CurrentSessionId = sessionConfig.Id,
+            CheckpointDir = string.IsNullOrWhiteSpace(checkpointDir) ? null : Path.GetFullPath(checkpointDir),
         };
         var auto = permissionMode is "auto" or "bypasspermissions";
         stream.Emit(new
@@ -821,6 +831,7 @@ public static class Program
             effort = sessionConfig.Effort.ToWireString(),
             resumed = history.Count > 0,
             rules = stream.Rules.Select(r => r.ToString()).ToArray(),
+            additional_dirs = addDirs,
         });
 
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -854,6 +865,7 @@ public static class Program
                 TimeLimit = timeLimit,
                 LogToSession = !ephemeral,
                 NoTools = noTools,
+                AdditionalDirs = addDirs,
             }, runCts.Token);
             if (runCts.IsCancellationRequested && !ct.IsCancellationRequested) cancelled = true;
         }

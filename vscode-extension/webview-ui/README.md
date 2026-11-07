@@ -56,3 +56,12 @@ Sans Arabic.
   - session titles
   - what the command palette shows for "Solvra"
 - `harness/live-before.mjs` captures the previous (v2) chat in the same setup, for comparisons.
+- `harness/live-phase3.mjs` runs on a throwaway multi-root workspace (`/tmp/svdemo` + `/tmp/svdata`)
+  in auto mode. Checks:
+  - the second folder is usable as context
+  - "Review" opens VS Code's diff editor with Keep/Undo in the title bar, and Undo restores the
+    original
+  - "Restore files to before this message" reverts two edits in two files
+  - a file reference opens at its line
+  - right-click "Explain with Solvra" sends the selection as a chip
+- `harness/vscode-launch.mjs` is the shared isolated-VS Code launcher used by `live-phase3.mjs`.
