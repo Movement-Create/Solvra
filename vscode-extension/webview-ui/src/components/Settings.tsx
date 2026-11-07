@@ -59,9 +59,9 @@ export function SettingsView({ state, onBack }: { state: State; onBack: () => vo
       </section>
       <section className="settings-section">
         <h3>Solvra backend</h3>
-        <TextField label="Solvra location" hint="Folder with Solvra.sln or a built Solvra.dll. Empty: found automatically." value={v.solvraPath} placeholder="Found automatically" onSave={(t) => save({ solvraPath: t })}
+        <TextField label="Solvra backend" hint="Solvra.dll, the solvra command, or a folder that contains Solvra.dll. Empty: the backend that came with the extension." value={v.executablePath} placeholder="Automatic" onSave={(t) => save({ executablePath: t })}
           extra={<button className="btn ghost small" onClick={() => post({ type: 'browseExecutable' })}>Browse…</button>} />
-        <TextField label=".NET executable" hint="Used to start the backend." value={v.dotnetPath} placeholder="dotnet" onSave={(t) => save({ dotnetPath: t })} />
+        <TextField label=".NET executable" hint="Runs the backend. Empty: found automatically." value={v.dotnetPath} placeholder="Automatic" onSave={(t) => save({ dotnetPath: t })} />
       </section>
     </div>
   );

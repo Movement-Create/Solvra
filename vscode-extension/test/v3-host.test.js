@@ -98,7 +98,7 @@ test('prompt: chips become references, titles come from the user words', () => {
 });
 
 test('stream args: modes map to permissions; plan never pairs with --auto; session vs title', () => {
-  const base = { dll: 'S.dll', prompt: 'p', model: 'chatgpt:gpt-5.6-sol' };
+  const base = { prefix: ['S.dll'], prompt: 'p', model: 'chatgpt:gpt-5.6-sol' };
   const ask = buildStreamArgs({ ...base, mode: 'ask', title: 'T' });
   assert.ok(!ask.includes('--auto') && !ask.includes('--plan'));
   assert.equal(ask[ask.indexOf('--permission-mode') + 1], 'default');

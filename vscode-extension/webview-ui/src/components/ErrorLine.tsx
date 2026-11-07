@@ -12,7 +12,7 @@ export function ErrorLine({ message, fix, provider, onDismiss, onOpenSettings }:
   const button = (() => {
     switch (fix) {
       case 'add_api_key': return { label: provider && PROVIDER_LABEL[provider] ? `Add ${PROVIDER_LABEL[provider]} API key` : 'Add API key', run: openSettings };
-      case 'set_executable': return { label: 'Set Solvra location', run: openSettings };
+      case 'set_executable': return { label: 'Set Solvra backend', run: openSettings };
       case 'install_dotnet': return { label: 'Install .NET 8', run: () => post({ type: 'runFix', fix: 'install_dotnet' }) };
       case 'codex_login': return { label: 'Sign in with Codex', run: () => post({ type: 'runFix', fix: 'codex_login' }) };
       case 'retry': return { label: 'Retry', run: () => window.dispatchEvent(new CustomEvent('solvra:retry')) };

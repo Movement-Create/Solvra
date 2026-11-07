@@ -168,9 +168,12 @@ public class SandboxManager
         int timeoutMs,
         CancellationToken ct)
     {
+        var bash = ShellLocator.Bash();
+        if (bash is null)
+            return new SandboxExecResult(Stdout: "", Stderr: ShellLocator.WindowsBashHelp, ExitCode: 127, TimedOut: false, Truncated: false);
         var psi = new ProcessStartInfo
         {
-            FileName = "/bin/bash",
+            FileName = bash,
             WorkingDirectory = cwd,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

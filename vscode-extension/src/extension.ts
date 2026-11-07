@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   const statusBar = new SolvraStatusBar();
   context.subscriptions.push({ dispose: () => statusBar.dispose() });
-  const runner = new AgentRunner(outputChannel, keys);
+  const runner = new AgentRunner(outputChannel, keys, context.extensionPath);
   const checkpoints = new CheckpointStore(vscode.Uri.joinPath(context.globalStorageUri, 'checkpoints').fsPath);
   const review = new EditReview(checkpoints);
   context.subscriptions.push(review);

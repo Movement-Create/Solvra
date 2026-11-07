@@ -419,7 +419,7 @@
         },
         "solvra.provider": {
           "type": "string",
-          "default": "google",
+          "default": "chatgpt",
           "enum": [
             "chatgpt",
             "anthropic",
@@ -489,12 +489,12 @@
         "solvra.solvraPath": {
           "type": "string",
           "default": "",
-          "description": "Path to Solvra repository root (the folder containing Solvra.sln). Leave blank for auto-detect. The extension expects a built Solvra.dll at src/Solvra/bin/Release/net8.0/ or Debug/net8.0/"
+          "description": "Older setting: a Solvra repository or release folder. Prefer solvra.executablePath."
         },
         "solvra.dotnetPath": {
           "type": "string",
-          "default": "dotnet",
-          "description": "Path to the dotnet executable (defaults to 'dotnet' on PATH)"
+          "default": "",
+          "description": "The dotnet executable that runs the backend. Empty: found automatically (DOTNET_ROOT, PATH, the usual install folders)."
         },
         "solvra.permissionRules": {
           "type": "object",
@@ -525,6 +525,11 @@
           "default": 0,
           "minimum": 0,
           "description": "Maximum estimated USD per message (0 means no limit)."
+        },
+        "solvra.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "The Solvra backend: Solvra.dll, the solvra command (macOS/Linux), or a folder containing Solvra.dll. Empty: use the backend bundled with the extension, then the installed one (~/.local/opt/solvra/current or %LOCALAPPDATA%\\Solvra\\current)."
         }
       }
     }
@@ -544,6 +549,7 @@
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "4.1.0",
     "eslint": "^8.0.0",
     "ts-loader": "^9.0.0",
     "typescript": "^5.0.0",
