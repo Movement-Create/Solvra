@@ -97,7 +97,7 @@ export interface InitState {
 
 export type HostMessage =
   | { type: 'init'; state: InitState }
-  | { type: 'runStarted'; runId: string; text: string; chips: Chip[] }
+  | { type: 'runStarted'; runId: string; text: string; chips: Chip[]; /** ms since epoch, so late viewers show the real elapsed time */ startedAt?: number }
   | { type: 'stream'; runId: string; event: StreamEvent }
   | { type: 'runEnded'; runId: string; exitCode: number | null }
   | { type: 'sessions'; sessions: SessionRow[] }
@@ -117,6 +117,8 @@ export type HostMessage =
   | { type: 'notice'; text: string }
   | { type: 'open'; view: 'settings' | 'memory' | 'tools' | 'sessions' | 'model' }
   | { type: 'focusInput' }
+  /** An approval was answered (in this or another view of the same run): remove it everywhere. */
+  | { type: 'approvalAnswered'; runId: string; id: string; decision: Decision }
   /** Review state of edits that have a checkpoint (live ones and those restored with a session). */
   | { type: 'edits'; edits: Record<string, EditInfo> }
   /** Undo stopped because these files changed after Solvra edited them; the user may force it. */

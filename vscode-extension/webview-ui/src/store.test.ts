@@ -162,3 +162,16 @@ describe('checkpointed edits', () => {
     expect(s.undoConflict).toBeNull();
   });
 });
+
+describe('approvals answered in another view', () => {
+  it('removes the approval for the same run only', () => {
+    let s = run([
+      { type: 'tool_call', agent: 'main', id: 't1', name: 'file_edit', input: {}, summary: 'Edit a', kind: 'edit' },
+      { type: 'permission_request', id: 'p1', agent: 'main', tool_call_id: 't1', tool: 'file_edit', kind: 'edit', summary: 'Edit a', diff: null, command: null, always: 'edit' },
+    ]);
+    expect(reducer(s, { type: 'approvalAnswered', runId: 'other', id: 'p1', decision: 'allow' }).approvals).toHaveLength(1);
+    s = reducer(s, { type: 'approvalAnswered', runId: 'r1', id: 'p1', decision: 'allow' });
+    expect(s.approvals).toEqual([]);
+    expect(s.turns[0].items[0]).toMatchObject({ status: 'running' });
+  });
+});

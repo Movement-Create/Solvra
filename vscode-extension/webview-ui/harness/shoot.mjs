@@ -63,7 +63,35 @@ await page.goto(`http://127.0.0.1:${port}/?s=empty&theme=light`);
 await page.waitForSelector('.composer');
 await page.keyboard.press('Shift+Tab');
 const modes = await page.evaluate(() => window.__sent.filter((m) => m.type === 'setMode').map((m) => m.mode));
+// The / and @ menus must be fully visible (not clipped by the input area) in a narrow sidebar
+// and in a wide editor tab.
+const menus = [];
+for (const [surface, width] of [['sidebar', 340], ['tab', 1000]]) {
+  for (const [scenario, typed] of [['slash', '/'], ['mention', 'Look at @sa']]) {
+    const p = await browser.newPage({ viewport: { width, height: 700 } });
+    await p.goto(`http://127.0.0.1:${port}/?s=${scenario}&theme=dark&surface=${surface}`);
+    await p.waitForSelector('.composer');
+    await p.getByLabel('Message Solvra').type(typed);
+    await p.waitForTimeout(300);
+    const r = await p.evaluate(() => {
+      const popup = document.querySelector('.popup');
+      if (!popup) return { ok: false, why: 'no menu' };
+      const box = popup.getBoundingClientRect();
+      const items = [...popup.querySelectorAll('.popup-item')];
+      const visible = (el) => {
+        const b = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return !!hit && el.contains(hit);
+      };
+      const inView = box.top >= 0 && box.bottom <= innerHeight && box.height > 40;
+      const ok = inView && items.length > 0 && visible(items[0]) && visible(items[items.length - 1]);
+      return { ok, why: ok ? '' : `top=${Math.round(box.top)} height=${Math.round(box.height)} items=${items.length}` };
+    });
+    menus.push({ surface, scenario, ...r });
+    await p.close();
+  }
+}
 await browser.close();
 server.close();
-console.log(JSON.stringify({ shots: shots.length, out, keyboardApproval: sent, shiftTabModes: modes, errors }, null, 2));
-if (errors.length || sent[0]?.decision !== 'allow_always' || modes[0] !== 'plan') process.exit(1);
+console.log(JSON.stringify({ shots: shots.length, out, keyboardApproval: sent, shiftTabModes: modes, menus, errors }, null, 2));
+if (errors.length || sent[0]?.decision !== 'allow_always' || modes[0] !== 'plan' || menus.some((m) => !m.ok)) process.exit(1);
