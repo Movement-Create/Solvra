@@ -374,28 +374,25 @@ internal sealed class CodexAppServer : IDisposable
 
     public static async Task<CodexAppServer> StartAsync(CancellationToken ct)
     {
-        var bin = Environment.GetEnvironmentVariable("SOLVRA_CODEX_BIN") ?? FindCodex();
-        var psi = new ProcessStartInfo(bin, "app-server")
+        var codex = Solvra.Security.ShellLocator.Codex();
+        var psi = new ProcessStartInfo(codex.FileName)
         {
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             UseShellExecute = false, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        var proc = Process.Start(psi) ?? throw new InvalidOperationException("could not start codex app-server");
+        foreach (var a in codex.PrefixArgs) psi.ArgumentList.Add(a);
+        psi.ArgumentList.Add("app-server");
+        Process proc;
+        try { proc = Process.Start(psi) ?? throw new InvalidOperationException("could not start codex app-server"); }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            throw new InvalidOperationException("The Codex CLI was not found. Install it (npm install -g @openai/codex), run 'codex login', or set SOLVRA_CODEX_BIN.");
+        }
         _ = proc.StandardError.ReadToEndAsync();   // drain
         var server = new CodexAppServer(proc);
         await server.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "solvra", ["title"] = "Solvra", ["version"] = "1.0" }, ["capabilities"] = null }, ct);
         await server.WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "initialized" });
         return server;
-    }
-
-    private static string FindCodex()
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var npm = Path.Combine(home, ".npm-global", "bin", "codex");
-        if (File.Exists(npm)) return npm;
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':'))
-            if (dir.Length > 0 && File.Exists(Path.Combine(dir, "codex"))) return Path.Combine(dir, "codex");
-        return "codex";
     }
 
     private async Task WriteAsync(JsonObject msg)

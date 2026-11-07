@@ -24,6 +24,14 @@ public record AgentRunOptions
     public Func<ToolCall, Task<bool>>? OnPermissionRequest { get; init; }
     public Action<ToolCall>? OnToolCall { get; init; }
     public Action<ToolResult>? OnToolResult { get; init; }
+    /// <summary>Reasoning ("thinking") deltas, streamed when the provider sends them.</summary>
+    public Action<string>? OnThinking { get; init; }
+    /// <summary>After each model call: cumulative usage, cumulative cost and the tokens sent in that call.</summary>
+    public Action<TokenUsage, decimal, int>? OnUsage { get; init; }
+    /// <summary>Live observer for this run and its subagents (stream-json); null keeps the CLI behaviour.</summary>
+    public IAgentObserver? Observer { get; init; }
+    /// <summary>Id of this agent in observer events: "main" for the top-level run.</summary>
+    public string AgentId { get; init; } = "main";
     public int SubagentDepth { get; init; }
 
     /// <summary>Whether this run may delegate work through the agent tool.</summary>
@@ -41,6 +49,9 @@ public record AgentRunOptions
 
     /// <summary>Shared ownership of detached processes created by this run and its subagents.</summary>
     internal RunProcessTracker? ProcessTracker { get; init; }
+
+    /// <summary>More folders the user added (other workspace roots, data folders). Listed in the environment.</summary>
+    public IReadOnlyList<string> AdditionalDirs { get; init; } = [];
 
     /// <summary>Working directory for tools and project instructions (default: process cwd).</summary>
     public string? Cwd { get; init; }

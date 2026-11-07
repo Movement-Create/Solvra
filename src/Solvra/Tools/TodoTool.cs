@@ -120,5 +120,11 @@ public class TodoTool : ToolBase
         return new ToolExecuteResult(string.Join('\n', lines), false);
     }
 
-    private record TodoItem(string Task, string Status);
+    public record TodoItem(string Task, string Status);
+
+    /// <summary>A copy of the session's current list (empty when it has none).</summary>
+    public static IReadOnlyList<TodoItem> Snapshot(string sessionId)
+    {
+        lock (Lock) return Lists.TryGetValue(sessionId, out var list) ? list.ToList() : [];
+    }
 }

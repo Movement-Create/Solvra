@@ -1,3 +1,53 @@
+# Release 0.3.0 — 2026-11-07
+
+Branch `release/0.3.0` (worktree `release-0.3`), PR #7 on top of #6. The user authorized merging
+#3–#7 and publishing.
+
+- Backend on Windows: `ShellLocator` finds bash (Git for Windows; WSL's bash is skipped) and
+  `codex` (`codex.exe`, or npm's `codex.cmd` through `cmd.exe` with fixed arguments). Version 0.3.0.
+- Extension: `backend-locator.ts` searches `solvra.executablePath` (DLL, wrapper or folder; never a
+  `.cmd`), `solvraPath`, the bundled `backend/`, the installed location, then dev builds. It also
+  finds `dotnet` without PATH. ChatGPT is the default provider. "Sign in with Codex" installs the
+  CLI when missing.
+- Packaging: `vscode-extension/scripts/package.sh` builds a VSIX with the backend inside.
+  `scripts/build-release.sh` builds the VSIX, the macOS tar.gz and the Windows zip, plus SHA256SUMS.
+- macOS `install.sh` is one step: it sets up ChatGPT (and installs the Codex CLI) by default.
+  Windows: `install.ps1` plus "Install Solvra.cmd" (.NET, Git, Node/Codex, VS Code settings).
+- Verified on the devbox: the macOS installer in a throwaway HOME (OK from ChatGPT); the
+  installed VSIX in a clean VS Code (bundled backend, ChatGPT answered); 459 .NET, 24 host,
+  13 webview tests; pwsh checks of `install.ps1` helpers; the main live flow.
+- **Not verified on real macOS or Windows.** Untested there: `osascript` settings, the Windows
+  junction, winget, `dotnet-install.ps1`, `code.cmd`, `cmd.exe` launch of `codex.cmd`, Git Bash.
+
+---
+
+# VS Code extension fix and redesign: Phases 0–3 — 2026-11-07
+
+Stacked PRs, each with its own worktree under `/home/cosmos/wt/github/Solvra/`:
+
+| PR | Branch (base) | Worktree | What |
+|---|---|---|---|
+| #3 | `fix/ask-mode-safety` (main) | `ask-mode-safety` | Ask never passes `--auto`; plan never pairs with it; `--permission-mode`; in-chat approval notice |
+| #4 | `feature/stream-json` (#3) | `stream-json` | `run --output-format stream-json`, stdin approvals, nested parallel sub-agents, plan/usage events, session titles |
+| #5 | `feature/webview-v3` (#4) | `webview-v3` | React v3 chat (default), everything in-panel, SecretStorage keys + migration, palette shows only Open Chat |
+| #6 | `feature/vscode-integration` (#5) | `vscode-integration` | Checkpoints, native diff Keep/Undo, restore-to-message, every folder as context |
+
+Verification on #6: 455/455 .NET, 18 host, 13 webview tests; a 24-state screenshot harness; live
+VS Code 1.143.1 runs over CDP (`webview-ui/harness/live*.mjs`, throwaway `/tmp/svdemo` and
+`/tmp/svdata`, isolated `/tmp/svprof` and sessions folder, $0.25 budget) in dark and light.
+
+Open items and blockers:
+- The approved mockup (`Plans/solvra-chat-redesign.html`) and `Plans/ui-test-harness/` are not in
+  the repo (they're on the Mac checkout), and the claude.ai artifact isn't readable from the devbox.
+  Tokens the brief didn't give are marked `reconcile` in `webview-ui/src/styles/tokens.css`.
+- VS Code adds "Solvra: Focus on Chat View" and "View: Show Solvra" to the palette for every view;
+  an extension can't hide them.
+- The uncommitted 0.2.0 RC in the `vscode-release` worktree (another agent) overlaps these files.
+  This stack is based on `origin/main` and doesn't include it.
+- Changes made by `bash` are not checkpointed (file tools only).
+
+---
+
 # Limits and completion fix — 2026-10-10
 
 Task worktree: `/home/cosmos/wt/github/Solvra/limits-validation`, branch `fix/limits-validation`, base `origin/main` at `a9f69d8`.

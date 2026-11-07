@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { buildRunArgs, normalizeMode, parseApprovalNeeded } from './run-args';
+import { KeyStore, keyInfo } from './keys';
+import { Invocation, locateBackend } from './backend-locator';
 
 export interface RunResult {
   text: string;
@@ -41,10 +43,8 @@ export class AgentRunner {
   private outputChannel: vscode.OutputChannel;
   private currentProcess: ChildProcess | null = null;
   private _config: RunnerConfig = {};
-  private _bravePrompted = false;
-  private _lastSearchedPaths: string[] = [];
 
-  constructor(outputChannel: vscode.OutputChannel) {
+  constructor(outputChannel: vscode.OutputChannel, private readonly keys: KeyStore, private readonly extensionPath: string) {
     this.outputChannel = outputChannel;
   }
 
@@ -63,186 +63,65 @@ export class AgentRunner {
       model: config.get<string>('model', 'gemini-2.5-flash'),
       maxTurns: config.get<number>('maxTurns', 0),
       autoApprove: config.get<boolean>('autoApprove', false),
-      googleApiKey: config.get<string>('googleApiKey', ''),
-      anthropicApiKey: config.get<string>('anthropicApiKey', ''),
-      openaiApiKey: config.get<string>('openaiApiKey', ''),
-      moonshotApiKey: config.get<string>('moonshotApiKey', ''),
-      braveSearchKey: config.get<string>('braveSearchKey', ''),
       solvraPath: config.get<string>('solvraPath', ''),
-      dotnetPath: config.get<string>('dotnetPath', 'dotnet'),
     };
   }
 
-  /**
-   * Find the Solvra repository root (a directory containing Solvra.sln OR a built Solvra.dll).
-   * Search order: explicit setting → workspace folders → extension parent → home directories.
-   */
-  private getSolvraPath(): string {
-    const config = this.getConfig();
-    const searched: string[] = [];
-
-    const hasSolvra = (dir: string): boolean => {
-      if (!dir) return false;
-      if (fs.existsSync(path.join(dir, 'Solvra.sln'))) return true;
-      // Also accept if a built DLL exists under the expected path
-      return !!this._findDll(dir);
-    };
-
-    // 1. Explicit setting
-    if (config.solvraPath) {
-      if (hasSolvra(config.solvraPath)) return config.solvraPath;
-      searched.push(`solvra.solvraPath setting: ${config.solvraPath} (not found)`);
-    } else {
-      searched.push('solvra.solvraPath setting (not set)');
-    }
-
-    // 2. Workspace folders
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders) {
-      for (const folder of workspaceFolders) {
-        if (hasSolvra(folder.uri.fsPath)) return folder.uri.fsPath;
-        searched.push(`Workspace: ${folder.uri.fsPath} (no Solvra.sln or built DLL)`);
-      }
-    } else {
-      searched.push('Workspace folders (none open)');
-    }
-
-    // 3. Parent directory of the extension (repo root when developing in-tree)
-    const extensionRoot = path.resolve(__dirname, '..', '..');
-    if (hasSolvra(extensionRoot)) return extensionRoot;
-    searched.push(`Extension parent: ${extensionRoot} (no Solvra.sln or built DLL)`);
-
-    // 4. Common home-directory locations
-    const home = os.homedir();
-    const commonPaths = [
-      path.join(home, 'Solvra'),
-      path.join(home, 'solvra'),
-      path.join(home, 'src', 'Solvra'),
-      path.join(home, 'src', 'solvra'),
-    ];
-    for (const p of commonPaths) {
-      if (hasSolvra(p)) return p;
-      searched.push(`${p} (not found)`);
-    }
-
-    this._lastSearchedPaths = searched;
-    return '';
-  }
-
-  /**
-   * Find a built Solvra.dll under the given repo root.
-   * Prefers Release over Debug.
-   */
-  private _findDll(repoRoot: string): string {
-    const candidates = [
-      path.join(repoRoot, 'src', 'Solvra', 'bin', 'Release', 'net8.0', 'Solvra.dll'),
-      path.join(repoRoot, 'src', 'Solvra', 'bin', 'Debug', 'net8.0', 'Solvra.dll'),
-      // Newer .NET versions fall-through
-      path.join(repoRoot, 'src', 'Solvra', 'bin', 'Release', 'net9.0', 'Solvra.dll'),
-      path.join(repoRoot, 'src', 'Solvra', 'bin', 'Debug', 'net9.0', 'Solvra.dll'),
-    ];
-    for (const dll of candidates) {
-      if (fs.existsSync(dll)) return dll;
-    }
-    return '';
-  }
-
-  public getSolvraDir(): string | null {
-    const dir = this.getSolvraPath();
-    return dir || null;
-  }
-
-  public getSessionsDir(): string | null {
-    const dir = this.getSolvraPath();
-    if (!dir) return null;
-    return path.join(dir, 'sessions');
-  }
-
-  private buildEnv(_provider: string): NodeJS.ProcessEnv {
-    const config = this.getConfig();
-    const env: Record<string, string> = { ...process.env } as Record<string, string>;
-
-    // VS Code settings override env vars
-    if (config.googleApiKey) {
-      env['GOOGLE_API_KEY'] = config.googleApiKey;
-      env['GEMINI_API_KEY'] = config.googleApiKey;
-    }
-    if (config.anthropicApiKey) env['ANTHROPIC_API_KEY'] = config.anthropicApiKey;
-    if (config.openaiApiKey) env['OPENAI_API_KEY'] = config.openaiApiKey;
-    if (config.moonshotApiKey) env['MOONSHOT_API_KEY'] = config.moonshotApiKey;
-    if (config.braveSearchKey) env['BRAVE_API_KEY'] = config.braveSearchKey;
-
-    return env;
-  }
-
-  private static PROVIDER_KEY_MAP: Record<string, { setting: string; env: string; label: string; url: string }> = {
-    google:    { setting: 'googleApiKey',    env: 'GOOGLE_API_KEY',    label: 'Google Gemini',    url: 'https://aistudio.google.com' },
-    anthropic: { setting: 'anthropicApiKey', env: 'ANTHROPIC_API_KEY', label: 'Anthropic Claude', url: 'https://console.anthropic.com' },
-    openai:    { setting: 'openaiApiKey',    env: 'OPENAI_API_KEY',    label: 'OpenAI',           url: 'https://platform.openai.com' },
-    moonshot:  { setting: 'moonshotApiKey',  env: 'MOONSHOT_API_KEY',  label: 'Moonshot (Kimi)',  url: 'https://platform.moonshot.ai' },
-  };
-
-  private async ensureApiKeys(provider: string): Promise<boolean> {
+  /** Where the backend was found (see backend-locator.ts). */
+  private locate() {
     const cfg = vscode.workspace.getConfiguration('solvra');
+    return locateBackend({
+      platform: process.platform, home: os.homedir(), env: process.env,
+      exists: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
+      isDirectory: (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
+      executablePath: cfg.get<string>('executablePath', ''),
+      solvraPath: cfg.get<string>('solvraPath', ''),
+      dotnetPath: cfg.get<string>('dotnetPath', ''),
+      extensionPath: this.extensionPath,
+      workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+    });
+  }
 
-    // Provider key (required)
-    const info = AgentRunner.PROVIDER_KEY_MAP[provider];
-    if (info) {
-      const existing = cfg.get<string>(info.setting, '') || process.env[info.env] || '';
-      if (!existing) {
-        const entered = await vscode.window.showInputBox({
-          title: `${info.label} API key required`,
-          prompt: `Enter your ${info.label} API key (get one at ${info.url})`,
-          password: true,
-          ignoreFocusOut: true,
-          placeHolder: info.env,
-        });
-        if (!entered) {
-          vscode.window.showWarningMessage(`Solvra: ${info.label} API key is required to run.`);
-          return false;
-        }
-        await cfg.update(info.setting, entered.trim(), vscode.ConfigurationTarget.Global);
-      }
-    }
+  /** Legacy UIs: the Solvra folder in use (repository or release), if any. */
+  public getSolvraDir(): string | null {
+    const inv = this.locate().invocation;
+    const dll = inv?.prefix[0];
+    return dll ? path.dirname(dll) : null;
+  }
 
-    // Brave Search key (optional)
-    const braveExisting = cfg.get<string>('braveSearchKey', '') || process.env.BRAVE_API_KEY || '';
-    if (!braveExisting && !this._bravePrompted) {
-      this._bravePrompted = true;
-      const entered = await vscode.window.showInputBox({
-        title: 'Brave Search API key (optional)',
-        prompt: 'Enter your Brave Search API key for web search (free 2k/mo at brave.com/search/api). Leave blank to skip.',
-        password: true,
-        ignoreFocusOut: true,
-        placeHolder: 'BRAVE_API_KEY (optional — press Enter to skip)',
-      });
-      if (entered && entered.trim()) {
-        await cfg.update('braveSearchKey', entered.trim(), vscode.ConfigurationTarget.Global);
-      }
-    }
+  /** Legacy sessions tree: Solvra keeps sessions under ~/.local/share/solvra/sessions unless overridden. */
+  public getSessionsDir(): string | null {
+    return process.env.SOLVRA_SESSIONS_DIR || path.join(process.env.SOLVRA_HOME || path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'solvra'), 'sessions');
+  }
 
+  /** Environment for backend processes: API keys come from SecretStorage. */
+  public buildEnv(): Promise<NodeJS.ProcessEnv> {
+    return this.keys.processEnv();
+  }
+
+  /** Legacy UIs only (v1/v2): prompt for a missing key and store it in SecretStorage. */
+  private async ensureApiKeys(provider: string): Promise<boolean> {
+    const info = keyInfo(provider);
+    if (!info || (await this.keys.has(provider))) return true;
+    const entered = await vscode.window.showInputBox({
+      title: `${info.label} API key required`,
+      prompt: `Enter your ${info.label} API key (get one at ${info.url}). It is stored in VS Code's secret storage.`,
+      password: true,
+      ignoreFocusOut: true,
+    });
+    if (!entered?.trim()) return false;
+    await this.keys.set(provider, entered);
     return true;
   }
 
-  /**
-   * Resolve the Solvra DLL to invoke and return [dotnetPath, dllPath, solvraDir] for spawning.
-   * Throws a helpful error if the DLL is missing.
-   */
-  private resolveInvocation(): { dotnet: string; dll: string; cwd: string } {
-    const solvraDir = this.getSolvraPath();
-    if (!solvraDir) {
-      const paths = this._lastSearchedPaths.map(p => `  - ${p}`).join('\n');
-      throw new Error(
-        `Solvra installation not found. Searched:\n${paths}\nSet solvra.solvraPath in VS Code settings to your Solvra repository root (the folder containing Solvra.sln).`
-      );
+  /** How to start the backend: command + prefix args. Throws a readable error when it is missing. */
+  public resolveInvocation(): Invocation & { cwd: string } {
+    const found = this.locate();
+    if (!found.invocation) {
+      const searched = found.searched.map((p) => `  - ${p}`).join('\n');
+      throw new Error(`${found.error ?? 'Solvra backend not found.'}${searched ? `\nSearched:\n${searched}` : ''}\nSet "Solvra backend" in Solvra's settings (Solvra.dll or the folder that contains it).`);
     }
-    const dll = this._findDll(solvraDir);
-    if (!dll) {
-      throw new Error(
-        `Solvra.dll not found under ${solvraDir}. Run \`dotnet build\` in the Solvra directory first, then try again.`
-      );
-    }
-    return { dotnet: this.getConfig().dotnetPath, dll, cwd: solvraDir };
+    return { ...found.invocation, cwd: os.homedir() };
   }
 
   async run(options: AgentRunOptions): Promise<RunResult> {
@@ -261,25 +140,24 @@ export class AgentRunner {
     // caller and the UI have not chosen one; unknown values fall back to the safe "ask".
     const mode = normalizeMode(options.mode ?? this._config.mode, config.autoApprove ? 'auto' : 'ask');
 
-    const { dotnet, dll } = this.resolveInvocation();
+    const inv = this.resolveInvocation();
 
     // Use the user's workspace as the working directory, not the Solvra installation
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const cwd = workspaceFolder || os.homedir();
 
-    const args = buildRunArgs({
-      dll,
+    const args = [...inv.prefix, ...buildRunArgs({
       prompt: options.prompt,
       provider,
       model,
       maxTurns,
       mode,
       sessionId: options.sessionId,
-    });
+    })];
 
-    const env = this.buildEnv(provider);
+    const env = await this.buildEnv();
 
-    this.outputChannel.appendLine(`\n[Solvra] Running: ${dotnet} ${args.join(' ')}`);
+    this.outputChannel.appendLine(`\n[Solvra] Running: ${inv.command} ${args.join(' ')}`);
     this.outputChannel.appendLine(`[Solvra] Working dir: ${cwd}`);
 
     return new Promise((resolve, reject) => {
@@ -287,7 +165,7 @@ export class AgentRunner {
       let stderr = '';
       let streamedText = '';
 
-      const proc = spawn(dotnet, args, {
+      const proc = spawn(inv.command, args, {
         cwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -419,17 +297,19 @@ export class AgentRunner {
   }
 
   private spawnCliCapture(extraArgs: string[]): Promise<string> {
-    const { dotnet, dll, cwd } = this.resolveInvocation();
-    const config = this.getConfig();
-    const env = this.buildEnv(config.provider);
-
-    return new Promise((resolve, reject) => {
+    const inv = this.resolveInvocation();
+    return this.buildEnv().then((env) => new Promise<string>((resolve, reject) => {
       let stdout = '';
-      const proc = spawn(dotnet, [dll, ...extraArgs], { cwd, env });
+      const proc = spawn(inv.command, [...inv.prefix, ...extraArgs], { cwd: inv.cwd, env });
       proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
       proc.on('close', () => resolve(stdout));
       proc.on('error', reject);
-    });
+    }));
+  }
+
+  /** Run a backend CLI command and return stdout (exit code ignored). Used by the v3 chat. */
+  public capture(args: string[]): Promise<string> {
+    return this.spawnCliCapture(args);
   }
 
   async listTools(): Promise<string[]> {

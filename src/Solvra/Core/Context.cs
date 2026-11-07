@@ -210,12 +210,17 @@ Verification discipline:
     }
 
     /// <summary>Environment facts the model otherwise has to guess: cwd, OS, shell, date, git state.</summary>
-    public static string BuildEnvironmentInfo(string cwd, string model)
+    public static string BuildEnvironmentInfo(string cwd, string model, IReadOnlyList<string>? additionalDirs = null)
     {
         var sb = new StringBuilder("# Environment\n\n");
         sb.Append($"- Working directory: {cwd}\n");
+        if (additionalDirs is { Count: > 0 })
+        {
+            sb.Append("- Other folders the user added to this chat (use absolute paths for them):\n");
+            foreach (var d in additionalDirs) sb.Append($"    {d}\n");
+        }
         sb.Append($"- Platform: {RuntimeInformation.OSDescription.Trim()} ({RuntimeInformation.OSArchitecture})\n");
-        sb.Append($"- Shell for the bash tool: /bin/bash\n");
+        sb.Append($"- Shell for the bash tool: {Solvra.Security.ShellLocator.Bash() ?? "none (bash is not installed; commands will fail)"}\n");
         sb.Append($"- Today's date: {DateTime.Now:yyyy-MM-dd}\n");
         sb.Append($"- Model: {model}\n");
 

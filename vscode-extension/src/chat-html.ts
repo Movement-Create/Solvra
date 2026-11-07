@@ -12,7 +12,7 @@
  */
 import * as vscode from 'vscode';
 
-export type UiVersion = 'legacy' | 'v2';
+export type UiVersion = 'legacy' | 'v2' | 'v3';
 
 function getNonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -236,6 +236,39 @@ function legacyHtml(p: {
   </div>
 
 <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>`;
+}
+
+/**
+ * v3 (React) chat. Everything is bundled under media/v3 (scripts, styles, fonts, icons); the CSP
+ * allows only those files plus inline style attributes (used by menus and animations).
+ */
+export function getV3Html(webview: vscode.Webview, extensionUri: vscode.Uri, inTab: boolean): string {
+  const nonce = getNonce();
+  const base = vscode.Uri.joinPath(extensionUri, 'media', 'v3');
+  const js = webview.asWebviewUri(vscode.Uri.joinPath(base, 'main.js'));
+  const css = webview.asWebviewUri(vscode.Uri.joinPath(base, 'main.css'));
+  const src = webview.cspSource;
+  const csp = [
+    "default-src 'none'",
+    `img-src ${src} data:`,
+    `style-src ${src} 'unsafe-inline'`,
+    `font-src ${src}`,
+    `script-src 'nonce-${nonce}' ${src}`,
+  ].join('; ');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="${css}">
+  <title>Solvra</title>
+</head>
+<body data-surface="${inTab ? 'tab' : 'sidebar'}">
+  <div id="root"></div>
+  <script type="module" nonce="${nonce}" src="${js}"></script>
 </body>
 </html>`;
 }

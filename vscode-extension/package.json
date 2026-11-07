@@ -2,7 +2,7 @@
   "name": "solvra-vscode",
   "displayName": "Solvra",
   "description": "AI agent orchestrator for VS Code — chat, run prompts, explain and fix code (C#/.NET backend)",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "publisher": "solvra",
   "engines": {
     "vscode": "^1.85.0"
@@ -25,7 +25,7 @@
         {
           "id": "solvra-sidebar",
           "title": "Solvra",
-          "icon": "resources/solvra-crest.svg"
+          "icon": "resources/solvra-orbit.svg"
         }
       ]
     },
@@ -35,94 +35,405 @@
           "type": "tree",
           "id": "solvra.sessionsView",
           "name": "Sessions",
-          "icon": "resources/solvra-crest.svg",
-          "contextualTitle": "Solvra Sessions"
+          "icon": "resources/solvra-orbit.svg",
+          "contextualTitle": "Solvra Sessions",
+          "when": "config.solvra.ui.version != 'v3'"
         },
         {
           "type": "webview",
           "id": "solvra.chatView",
           "name": "Chat",
-          "icon": "resources/solvra-crest.svg",
+          "icon": "resources/solvra-orbit.svg",
           "contextualTitle": "Solvra"
         }
       ]
     },
     "commands": [
-      { "command": "solvra.openChat", "title": "Open Chat", "category": "Solvra", "icon": "$(comment-discussion)" },
-      { "command": "solvra.runPrompt", "title": "Run Prompt", "category": "Solvra", "icon": "$(play)" },
-      { "command": "solvra.runOnSelection", "title": "Run on Selection", "category": "Solvra" },
-      { "command": "solvra.explainSelection", "title": "Explain Selection", "category": "Solvra" },
-      { "command": "solvra.fixSelection", "title": "Fix Selection", "category": "Solvra" },
-      { "command": "solvra.listTools", "title": "List Tools", "category": "Solvra" },
-      { "command": "solvra.listSessions", "title": "List Sessions", "category": "Solvra" },
-      { "command": "solvra.addMemory", "title": "Add Memory", "category": "Solvra" },
-      { "command": "solvra.searchMemory", "title": "Search Memory", "category": "Solvra" },
-      { "command": "solvra.explainInChat", "title": "Solvra: Explain", "category": "Solvra" },
-      { "command": "solvra.fixInChat", "title": "Solvra: Fix", "category": "Solvra" },
-      { "command": "solvra.askSolvra", "title": "Solvra: Ask Solvra", "category": "Solvra", "icon": "resources/solvra-crest.svg" },
-      { "command": "solvra.openChatInTab", "title": "Open Chat in Editor Tab", "category": "Solvra", "icon": "$(link-external)" },
-      { "command": "solvra.newSession", "title": "New Session", "category": "Solvra", "icon": "$(add)" },
-      { "command": "solvra.refreshSessions", "title": "Refresh Sessions", "category": "Solvra", "icon": "$(refresh)" },
-      { "command": "solvra.openSession", "title": "Open Session", "category": "Solvra" },
-      { "command": "solvra.renameSession", "title": "Rename", "category": "Solvra", "icon": "$(edit)" },
-      { "command": "solvra.deleteSession", "title": "Delete", "category": "Solvra", "icon": "$(trash)" },
-      { "command": "solvra.toggleShowAllSessions", "title": "Toggle Show All Sessions", "category": "Solvra" },
-      { "command": "solvra.focusInput", "title": "Focus Chat Input", "category": "Solvra" },
-      { "command": "solvra.toggleThinking", "title": "Toggle Thinking Blocks", "category": "Solvra" },
-      { "command": "solvra.clearSession", "title": "Clear Current Session", "category": "Solvra" },
-      { "command": "solvra.pickModel", "title": "Solvra: Pick Model", "category": "Solvra", "icon": "$(sparkle)" }
+      {
+        "command": "solvra.openChat",
+        "title": "Open Chat",
+        "category": "Solvra",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "solvra.runPrompt",
+        "title": "Run Prompt",
+        "category": "Solvra",
+        "icon": "$(play)"
+      },
+      {
+        "command": "solvra.runOnSelection",
+        "title": "Run on Selection",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.explainSelection",
+        "title": "Explain Selection",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.fixSelection",
+        "title": "Fix Selection",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.listTools",
+        "title": "List Tools",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.listSessions",
+        "title": "List Sessions",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.addMemory",
+        "title": "Add Memory",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.searchMemory",
+        "title": "Search Memory",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.explainInChat",
+        "title": "Explain with Solvra",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.fixInChat",
+        "title": "Fix with Solvra",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.askSolvra",
+        "title": "Ask Solvra",
+        "category": "Solvra",
+        "icon": "resources/solvra-orbit.svg"
+      },
+      {
+        "command": "solvra.openChatInTab",
+        "title": "Open Chat in Editor Tab",
+        "category": "Solvra",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "solvra.newSession",
+        "title": "New Session",
+        "category": "Solvra",
+        "icon": "$(add)"
+      },
+      {
+        "command": "solvra.refreshSessions",
+        "title": "Refresh Sessions",
+        "category": "Solvra",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "solvra.openSession",
+        "title": "Open Session",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.renameSession",
+        "title": "Rename",
+        "category": "Solvra",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "solvra.deleteSession",
+        "title": "Delete",
+        "category": "Solvra",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "solvra.toggleShowAllSessions",
+        "title": "Toggle Show All Sessions",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.focusInput",
+        "title": "Focus Chat Input",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.toggleThinking",
+        "title": "Toggle Thinking Blocks",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.clearSession",
+        "title": "Clear Current Session",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.pickModel",
+        "title": "Solvra: Pick Model",
+        "category": "Solvra",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "solvra.openSettings",
+        "title": "Settings",
+        "category": "Solvra"
+      },
+      {
+        "command": "solvra.keepEdit",
+        "title": "Keep Solvra's Edit",
+        "category": "Solvra",
+        "icon": "$(check)"
+      },
+      {
+        "command": "solvra.undoEdit",
+        "title": "Undo Solvra's Edit",
+        "category": "Solvra",
+        "icon": "$(discard)"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "solvra.newSession", "when": "view == solvra.sessionsView", "group": "navigation@1" },
-        { "command": "solvra.refreshSessions", "when": "view == solvra.sessionsView", "group": "navigation@2" }
+        {
+          "command": "solvra.newSession",
+          "when": "view == solvra.sessionsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "solvra.refreshSessions",
+          "when": "view == solvra.sessionsView",
+          "group": "navigation@2"
+        }
       ],
       "view/item/context": [
-        { "command": "solvra.renameSession", "when": "view == solvra.sessionsView && viewItem == solvraSession", "group": "inline@1" },
-        { "command": "solvra.deleteSession", "when": "view == solvra.sessionsView && viewItem == solvraSession", "group": "inline@2" }
+        {
+          "command": "solvra.renameSession",
+          "when": "view == solvra.sessionsView && viewItem == solvraSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "solvra.deleteSession",
+          "when": "view == solvra.sessionsView && viewItem == solvraSession",
+          "group": "inline@2"
+        }
       ],
       "editor/context": [
-        { "command": "solvra.explainInChat", "when": "editorHasSelection", "group": "solvra@1" },
-        { "command": "solvra.fixInChat", "when": "editorHasSelection", "group": "solvra@2" },
-        { "command": "solvra.askSolvra", "when": "editorHasSelection", "group": "solvra@3" }
+        {
+          "command": "solvra.explainInChat",
+          "when": "editorHasSelection",
+          "group": "solvra@1"
+        },
+        {
+          "command": "solvra.fixInChat",
+          "when": "editorHasSelection",
+          "group": "solvra@2"
+        },
+        {
+          "command": "solvra.askSolvra",
+          "when": "editorHasSelection",
+          "group": "solvra@3"
+        }
       ],
       "editor/title": [
-        { "command": "solvra.askSolvra", "group": "navigation", "when": "resourceScheme == file" }
+        {
+          "command": "solvra.keepEdit",
+          "group": "navigation@1",
+          "when": "solvra.reviewingEdit"
+        },
+        {
+          "command": "solvra.undoEdit",
+          "group": "navigation@2",
+          "when": "solvra.reviewingEdit"
+        },
+        {
+          "command": "solvra.askSolvra",
+          "group": "navigation",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "solvra.runPrompt",
+          "when": "false"
+        },
+        {
+          "command": "solvra.runOnSelection",
+          "when": "false"
+        },
+        {
+          "command": "solvra.explainSelection",
+          "when": "false"
+        },
+        {
+          "command": "solvra.fixSelection",
+          "when": "false"
+        },
+        {
+          "command": "solvra.listTools",
+          "when": "false"
+        },
+        {
+          "command": "solvra.listSessions",
+          "when": "false"
+        },
+        {
+          "command": "solvra.addMemory",
+          "when": "false"
+        },
+        {
+          "command": "solvra.searchMemory",
+          "when": "false"
+        },
+        {
+          "command": "solvra.explainInChat",
+          "when": "false"
+        },
+        {
+          "command": "solvra.fixInChat",
+          "when": "false"
+        },
+        {
+          "command": "solvra.askSolvra",
+          "when": "false"
+        },
+        {
+          "command": "solvra.openChatInTab",
+          "when": "false"
+        },
+        {
+          "command": "solvra.newSession",
+          "when": "false"
+        },
+        {
+          "command": "solvra.refreshSessions",
+          "when": "false"
+        },
+        {
+          "command": "solvra.openSession",
+          "when": "false"
+        },
+        {
+          "command": "solvra.renameSession",
+          "when": "false"
+        },
+        {
+          "command": "solvra.deleteSession",
+          "when": "false"
+        },
+        {
+          "command": "solvra.toggleShowAllSessions",
+          "when": "false"
+        },
+        {
+          "command": "solvra.focusInput",
+          "when": "false"
+        },
+        {
+          "command": "solvra.toggleThinking",
+          "when": "false"
+        },
+        {
+          "command": "solvra.clearSession",
+          "when": "false"
+        },
+        {
+          "command": "solvra.pickModel",
+          "when": "false"
+        },
+        {
+          "command": "solvra.openSettings",
+          "when": "false"
+        },
+        {
+          "command": "solvra.keepEdit",
+          "when": "false"
+        },
+        {
+          "command": "solvra.undoEdit",
+          "when": "false"
+        }
       ]
     },
     "keybindings": [
-      { "command": "solvra.openChat", "key": "ctrl+shift+a", "mac": "cmd+shift+a" },
-      { "command": "solvra.askSolvra", "key": "alt+ctrl+s", "mac": "alt+cmd+s" },
-      { "command": "solvra.runPrompt", "key": "ctrl+shift+r", "mac": "cmd+shift+r" },
-      { "command": "solvra.newSession", "key": "ctrl+shift+n", "mac": "cmd+shift+n", "when": "focusedView == solvra.chatView || focusedView == solvra.sessionsView" },
-      { "command": "solvra.focusInput", "key": "ctrl+l", "mac": "cmd+l", "when": "focusedView == solvra.chatView" },
-      { "command": "solvra.toggleThinking", "key": "ctrl+shift+t", "mac": "cmd+shift+t", "when": "focusedView == solvra.chatView" },
-      { "command": "solvra.clearSession", "key": "ctrl+shift+k", "mac": "cmd+shift+k", "when": "focusedView == solvra.chatView" },
-      { "command": "solvra.pickModel", "key": "ctrl+k m", "mac": "cmd+k m" }
+      {
+        "command": "solvra.openChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "solvra.askSolvra",
+        "key": "alt+ctrl+s",
+        "mac": "alt+cmd+s"
+      },
+      {
+        "command": "solvra.runPrompt",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      },
+      {
+        "command": "solvra.newSession",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n",
+        "when": "focusedView == solvra.chatView || focusedView == solvra.sessionsView"
+      },
+      {
+        "command": "solvra.focusInput",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "focusedView == solvra.chatView"
+      },
+      {
+        "command": "solvra.toggleThinking",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "focusedView == solvra.chatView"
+      },
+      {
+        "command": "solvra.clearSession",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k",
+        "when": "focusedView == solvra.chatView"
+      },
+      {
+        "command": "solvra.pickModel",
+        "key": "ctrl+k m",
+        "mac": "cmd+k m"
+      }
     ],
     "configuration": {
       "title": "Solvra",
       "properties": {
         "solvra.ui.version": {
           "type": "string",
-          "default": "v2",
-          "enum": ["legacy", "v2"],
-          "enumDescriptions": [
-            "Previous chat UI",
-            "Current crest-branded UI"
+          "default": "v3",
+          "enum": [
+            "v3",
+            "v2",
+            "legacy"
           ],
-          "description": "Which chat UI to render. Set to legacy to fall back to the previous design."
+          "enumDescriptions": [
+            "Current chat (recommended)",
+            "Previous crest-branded chat",
+            "Oldest chat UI"
+          ],
+          "description": "Which chat UI to render. Changing it reloads the window."
         },
         "solvra.provider": {
           "type": "string",
-          "default": "google",
-          "enum": ["anthropic", "openai", "google", "ollama", "moonshot"],
-          "description": "Default AI provider"
+          "default": "chatgpt",
+          "enum": [
+            "chatgpt",
+            "anthropic",
+            "openai",
+            "google",
+            "ollama",
+            "moonshot"
+          ],
+          "description": "Provider used when the model has no provider: prefix (legacy). New chats store the model as provider:model."
         },
         "solvra.model": {
           "type": "string",
-          "default": "gemini-2.5-flash",
-          "description": "Default model name"
+          "default": "chatgpt:gpt-5.6-sol",
+          "description": "Default model as provider:model, e.g. chatgpt:gpt-5.6-sol or anthropic:claude-sonnet-5. Change it from the model menu in the chat."
         },
         "solvra.maxTurns": {
           "type": "number",
@@ -139,41 +450,51 @@
           "type": "string",
           "default": "",
           "description": "Google API key for Gemini models",
-          "markdownDescription": "Google API key. Get yours at [aistudio.google.com](https://aistudio.google.com)"
+          "markdownDescription": "Google API key. Get yours at [aistudio.google.com](https://aistudio.google.com)",
+          "deprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed.",
+          "markdownDeprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed."
         },
         "solvra.anthropicApiKey": {
           "type": "string",
           "default": "",
           "description": "Anthropic API key for Claude models",
-          "markdownDescription": "Anthropic API key. Get yours at [console.anthropic.com](https://console.anthropic.com)"
+          "markdownDescription": "Anthropic API key. Get yours at [console.anthropic.com](https://console.anthropic.com)",
+          "deprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed.",
+          "markdownDeprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed."
         },
         "solvra.openaiApiKey": {
           "type": "string",
           "default": "",
           "description": "OpenAI API key for GPT models",
-          "markdownDescription": "OpenAI API key. Get yours at [platform.openai.com](https://platform.openai.com)"
+          "markdownDescription": "OpenAI API key. Get yours at [platform.openai.com](https://platform.openai.com)",
+          "deprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed.",
+          "markdownDeprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed."
         },
         "solvra.moonshotApiKey": {
           "type": "string",
           "default": "",
           "description": "Moonshot API key for Kimi models",
-          "markdownDescription": "Moonshot API key for Kimi models. Get yours at [platform.moonshot.ai](https://platform.moonshot.ai)"
+          "markdownDescription": "Moonshot API key for Kimi models. Get yours at [platform.moonshot.ai](https://platform.moonshot.ai)",
+          "deprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed.",
+          "markdownDeprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed."
         },
         "solvra.braveSearchKey": {
           "type": "string",
           "default": "",
           "description": "Brave Search API key for web_search tool",
-          "markdownDescription": "Brave Search API key (free 2k/month). Get yours at [brave.com/search/api](https://brave.com/search/api/)"
+          "markdownDescription": "Brave Search API key (free 2k/month). Get yours at [brave.com/search/api](https://brave.com/search/api/)",
+          "deprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed.",
+          "markdownDeprecationMessage": "API keys are stored in VS Code's secret storage. Set them in the Solvra chat: Settings. A value here is moved there automatically and removed."
         },
         "solvra.solvraPath": {
           "type": "string",
           "default": "",
-          "description": "Path to Solvra repository root (the folder containing Solvra.sln). Leave blank for auto-detect. The extension expects a built Solvra.dll at src/Solvra/bin/Release/net8.0/ or Debug/net8.0/"
+          "description": "Older setting: a Solvra repository or release folder. Prefer solvra.executablePath."
         },
         "solvra.dotnetPath": {
           "type": "string",
-          "default": "dotnet",
-          "description": "Path to the dotnet executable (defaults to 'dotnet' on PATH)"
+          "default": "",
+          "description": "The dotnet executable that runs the backend. Empty: found automatically (DOTNET_ROOT, PATH, the usual install folders)."
         },
         "solvra.permissionRules": {
           "type": "object",
@@ -187,24 +508,48 @@
             "code_run": "ask"
           },
           "description": "Per-tool permission hints (UI-level only — Solvra enforces permissions via its own session config)."
+        },
+        "solvra.effort": {
+          "type": "string",
+          "default": "medium",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "description": "Reasoning effort for new runs."
+        },
+        "solvra.maxBudget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum estimated USD per message (0 means no limit)."
+        },
+        "solvra.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "The Solvra backend: Solvra.dll, the solvra command (macOS/Linux), or a folder containing Solvra.dll. Empty: use the backend bundled with the extension, then the installed one (~/.local/opt/solvra/current or %LOCALAPPDATA%\\Solvra\\current)."
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "npm run build:webview && npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "test": "npm run compile-tests && node --test test/*.test.js",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "build:webview": "npm --prefix webview-ui run build"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "4.1.0",
     "eslint": "^8.0.0",
     "ts-loader": "^9.0.0",
     "typescript": "^5.0.0",

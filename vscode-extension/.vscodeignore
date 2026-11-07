@@ -12,3 +12,7 @@ vsc-extension-quickstart.md
 **/*.map
 **/.eslintrc.json
 test/**
+webview-ui/**
+scripts/**
+backend/**/*.pdb
+*.vsix

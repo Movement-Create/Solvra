@@ -51,7 +51,8 @@ export function permissionArgs(mode: ChatMode): string[] {
 }
 
 export interface RunArgsInput {
-  dll: string;
+  /** Solvra.dll when started through dotnet; omit when the caller adds its own prefix. */
+  dll?: string;
   prompt: string;
   provider: string;
   model: string;
@@ -62,7 +63,7 @@ export interface RunArgsInput {
 
 export function buildRunArgs(input: RunArgsInput): string[] {
   const args = [
-    input.dll,
+    ...(input.dll ? [input.dll] : []),
     'run',
     input.prompt,
     '--provider', input.provider,
