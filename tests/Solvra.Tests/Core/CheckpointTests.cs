@@ -91,7 +91,7 @@ public class CheckpointTests : IDisposable
             .Then(ScriptedProvider.Tool("file_edit", new { path = "b.txt", old_string = "one", new_string = "two" }, id: "e3"))
             .Then(ScriptedProvider.Text("ok")), checkpoints: false);
         Assert.Equal(JsonValueKind.Null, off.OfType("tool_result").Single().GetProperty("checkpoint").ValueKind);
-        Assert.False(Directory.Exists(Checkpoints) && Directory.GetFiles(Checkpoints).Any(f => f.Contains("e3")));
+        Assert.False(Directory.Exists(Checkpoints) && Directory.GetFiles(Checkpoints).Any(f => Path.GetFileName(f).StartsWith("e3", StringComparison.Ordinal)));
     }
 
     [Fact]
