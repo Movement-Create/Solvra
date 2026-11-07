@@ -6,20 +6,23 @@
 #   ./configure-codex.sh                     # model gpt-5.6-sol
 #   ./configure-codex.sh --model gpt-5.6-luna
 #   ./configure-codex.sh --no-test           # skip the one-line live test call
+# Installs the Codex CLI if it is missing (Homebrew, else npm).
 set -euo pipefail
 
 MODEL="gpt-5.6-sol"
 LIVE_TEST=1
+QUIET_END=0
 WRAPPER="${SOLVRA_PREFIX:-$HOME/.local}/bin/solvra"
 ENV_FILE="$HOME/.config/solvra/env.sh"
 SETTINGS="${SOLVRA_VSCODE_SETTINGS:-$HOME/Library/Application Support/Code/User/settings.json}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 
-usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --model) shift; MODEL="${1:?--model needs a value}"; MODEL="${MODEL#chatgpt:}" ;;
     --no-test) LIVE_TEST=0 ;;
+    --quiet-end) QUIET_END=1 ;;  # used by install.sh, which prints its own summary
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -48,7 +51,17 @@ find_codex() {
 }
 CODEX="$(find_codex || true)"
 if [ -z "$CODEX" ]; then
-  die "Codex CLI not found. Install it (brew install codex, or npm install -g @openai/codex), run 'codex login', then re-run this script."
+  say "Codex CLI not found; installing it…"
+  if command -v brew >/dev/null 2>&1; then
+    brew install codex || warn "brew install codex failed"
+  elif command -v npm >/dev/null 2>&1; then
+    # Install for this user only: no sudo, even with the system Node.
+    npm install -g --prefix "$HOME/.npm-global" @openai/codex || warn "npm install @openai/codex failed"
+  else
+    die "Codex CLI not found and neither Homebrew nor npm is available. Install Node.js (https://nodejs.org) or Homebrew (https://brew.sh), then re-run ./install.sh."
+  fi
+  CODEX="$(find_codex || true)"
+  [ -n "$CODEX" ] || die "Codex CLI still not found. Install it (brew install codex, or npm install -g @openai/codex), then re-run ./configure-codex.sh."
 fi
 say "Codex CLI: $CODEX"
 
@@ -94,9 +107,11 @@ fi
 
 # ---------------------------------------------------------------- VS Code settings
 . "$(cd "$(dirname "$0")" && pwd)/vscode-settings.sh"
-update_vscode_settings chatgpt "$MODEL"
+update_vscode_settings chatgpt "chatgpt:$MODEL"
 
-echo ""
-say "Done. Open a new terminal and run: solvra chat"
-echo "  In VS Code: reload the window (Cmd+Shift+P → 'Developer: Reload Window'), then use the Solvra sidebar."
-echo "  No API key is needed; 'Solvra: Pick Model' lists the other ChatGPT models."
+if [ "$QUIET_END" = "0" ]; then
+  echo ""
+  say "Done. Open a new terminal and run: solvra chat"
+  echo "  In VS Code: quit and reopen VS Code, then click the Solvra icon in the Activity Bar."
+  echo "  No API key is needed; the model menu in the chat lists the other ChatGPT models."
+fi

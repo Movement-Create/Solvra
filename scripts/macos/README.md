@@ -7,16 +7,19 @@ that includes the `osx-arm64` and `osx-x64` native libraries, so a single bundle
 Apple Silicon and Intel Macs.
 
 ```sh
-scripts/macos/build-bundle.sh vscode-extension/solvra-vscode-0.2.0.vsix
+scripts/macos/build-bundle.sh dist/solvra-vscode-0.3.0.vsix   # or scripts/build-release.sh for every file
 ```
 
 On the Mac:
 
 ```sh
-tar -xzf solvra-macos-0.2.0.tar.gz && cd solvra-macos-0.2.0
+tar -xzf solvra-macos-0.3.0.tar.gz && cd solvra-macos-0.3.0
 shasum -a 256 -c SHA256SUMS      # optional integrity check
-./install.sh                     # --no-vscode | --no-cli | --no-dotnet | --prefix DIR
+./install.sh                     # --model M | --no-chatgpt | --no-vscode | --no-cli | --no-dotnet | --prefix DIR
 ```
+
+`install.sh` does everything in one go, ending with the ChatGPT setup below (skip it with
+`--no-chatgpt`). To update, run the newer bundle's `install.sh`.
 
 `install.sh` installs everything per user, with no sudo:
 
@@ -60,8 +63,8 @@ from your shell profile.
 ./configure-codex.sh --model gpt-5.6-luna
 ```
 
-This requires the Codex CLI (`brew install codex` or `npm install -g @openai/codex`). If Codex is
-not signed in yet, the script runs `codex login`. Solvra only reads `~/.codex/auth.json`;
+`install.sh` runs this for you. It installs the Codex CLI when missing (Homebrew, else npm into
+`~/.npm-global`, no sudo); if Codex is not signed in yet, it runs `codex login`. Solvra only reads `~/.codex/auth.json`;
 refreshing the login is left to `codex app-server`. The script writes `SOLVRA_PROVIDER=chatgpt`,
 the model and `SOLVRA_CODEX_BIN` to `~/.config/solvra/env.sh`, points VS Code at the wrapper,
 and sends a one-line test request. Both configure scripts update VS Code settings through the

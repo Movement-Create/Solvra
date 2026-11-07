@@ -4,8 +4,9 @@ import { NdjsonParser } from './ndjson';
 import type { ChatMode, Decision, StreamEvent } from './protocol';
 
 export interface StreamRunOptions {
-  dotnet: string;
-  dll: string;
+  /** Program to start (dotnet or a wrapper) and the arguments before Solvra's own. */
+  command: string;
+  prefix: string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
   prompt: string;
@@ -24,8 +25,8 @@ export interface StreamRunOptions {
 }
 
 /** Command line for a stream-json run. Pure; unit-tested. */
-export function buildStreamArgs(o: Omit<StreamRunOptions, 'dotnet' | 'cwd' | 'env'>): string[] {
-  const args = [o.dll, 'run', o.prompt, '--output-format', 'stream-json'];
+export function buildStreamArgs(o: Omit<StreamRunOptions, 'command' | 'cwd' | 'env'>): string[] {
+  const args = [...o.prefix, 'run', o.prompt, '--output-format', 'stream-json'];
   // "provider:model" pins the provider in the backend.
   if (o.model) args.push('--model', o.model);
   args.push('--permission-mode', o.mode === 'ask' ? 'default' : o.mode);
@@ -57,9 +58,10 @@ export class StreamRun {
 
   start(): Promise<number | null> {
     const args = buildStreamArgs(this.options);
-    this.log(`[Solvra] ${this.options.dotnet} ${args.map((a, i) => (i === 2 ? JSON.stringify(a.slice(0, 80)) : a)).join(' ')}`);
+    const promptAt = this.options.prefix.length + 1;
+    this.log(`[Solvra] ${this.options.command} ${args.map((a, i) => (i === promptAt ? JSON.stringify(a.slice(0, 80)) : a)).join(' ')}`);
     return new Promise((resolve, reject) => {
-      const proc = spawn(this.options.dotnet, args, { cwd: this.options.cwd, env: this.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(this.options.command, args, { cwd: this.options.cwd, env: this.options.env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.proc = proc;
       const parser = new NdjsonParser<StreamEvent>(this.onEvent, (line) => this.log(`[stdout] ${line}`));
       proc.stdout.setEncoding('utf8');

@@ -4,6 +4,20 @@ Lightweight, powerful, secure AI agent orchestrator — built in C# (.NET 8).
 
 A complete rewrite of [Altimeter](https://github.com/Movement-Create/Altimeter) in C#, preserving the same architecture and design philosophy.
 
+## Install (macOS and Windows)
+
+Download the installer for your system from the
+[latest release](https://github.com/Movement-Create/Solvra/releases/latest). It sets up the
+`solvra` command, the VS Code extension, and ChatGPT through your Codex sign-in (no API key):
+
+- **macOS:** `tar -xzf solvra-macos-*.tar.gz && cd solvra-macos-* && ./install.sh`
+- **Windows:** extract `solvra-windows-*.zip` and double-click **Install Solvra.cmd**
+
+Then reopen VS Code and click the Solvra icon in the Activity Bar. To update, run the newer
+installer the same way: it replaces the old version and keeps your settings. Details:
+[scripts/macos/README.md](scripts/macos/README.md), [scripts/windows/README.md](scripts/windows/README.md).
+Maintainers build every release file with `scripts/build-release.sh` (needs .NET 8 SDK, Node, Python 3).
+
 ## Design Philosophy
 
 1. **Lightweight** — Minimal dependencies. Pure C#/.NET 8. The agent loop is a simple while loop.

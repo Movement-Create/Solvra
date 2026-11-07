@@ -52,13 +52,18 @@ Solvra for macOS — extension $EXT_VERSION, backend $BACKEND_VERSION
 
   cd $NAME
   ./install.sh
-  ./configure-codex.sh      # ChatGPT subscription via your Codex sign-in (no API key), or
-  ./configure-openai.sh     # OpenAI-compatible API key (default: OpenCode Zen Go gateway, glm-5.3)
 
-install.sh installs the Solvra CLI (~/.local/bin/solvra) and the VS Code extension
-(solvra.solvra-vscode), downloading the .NET 8 runtime to ~/.dotnet if it is missing.
-The configure scripts point both the CLI and VS Code at the same provider settings;
-configure-openai.sh keeps its API key in the macOS Keychain. All scripts accept --help.
+That is all. install.sh installs the .NET 8 runtime (if missing), the Solvra CLI
+(~/.local/bin/solvra) and the VS Code extension, then sets up ChatGPT through your Codex
+sign-in (it installs the Codex CLI if needed and opens your browser to sign in). No API key.
+Then quit and reopen VS Code and click the Solvra icon.
+
+  ./install.sh --model gpt-5.6-luna   # another ChatGPT model
+  ./install.sh --no-chatgpt           # skip ChatGPT; use ./configure-openai.sh for an API key
+  ./configure-codex.sh                # redo the ChatGPT setup later (e.g. after signing out)
+
+All scripts accept --help. Updating: run the newer bundle's ./install.sh; it replaces the
+previous version and keeps your settings.
 EOF
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 

@@ -220,7 +220,7 @@ Verification discipline:
             foreach (var d in additionalDirs) sb.Append($"    {d}\n");
         }
         sb.Append($"- Platform: {RuntimeInformation.OSDescription.Trim()} ({RuntimeInformation.OSArchitecture})\n");
-        sb.Append($"- Shell for the bash tool: /bin/bash\n");
+        sb.Append($"- Shell for the bash tool: {Solvra.Security.ShellLocator.Bash() ?? "none (bash is not installed; commands will fail)"}\n");
         sb.Append($"- Today's date: {DateTime.Now:yyyy-MM-dd}\n");
         sb.Append($"- Model: {model}\n");
 

@@ -164,7 +164,7 @@ export class V3Controller implements vscode.Disposable {
         return;
       case 'browseExecutable': {
         const picked = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: true, canSelectMany: false, openLabel: 'Use for Solvra' });
-        if (picked?.[0]) await this.saveSettings({ solvraPath: picked[0].fsPath });
+        if (picked?.[0]) await this.saveSettings({ executablePath: picked[0].fsPath });
         return;
       }
       case 'openDiff': await this.s.review.open(m.toolId); return;
@@ -190,9 +190,12 @@ export class V3Controller implements vscode.Disposable {
       }
       case 'runFix': {
         if (m.fix === 'codex_login') {
+          // Sign in with Codex; install the Codex CLI first (npm) when it is missing.
           const t = vscode.window.createTerminal({ name: 'Codex sign-in' });
           t.show();
-          t.sendText('codex login');
+          t.sendText(process.platform === 'win32'
+            ? 'if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { npm install -g @openai/codex }; codex login'
+            : 'command -v codex >/dev/null || npm install -g @openai/codex; codex login');
         } else if (m.fix === 'install_dotnet') {
           await vscode.env.openExternal(vscode.Uri.parse('https://dotnet.microsoft.com/download/dotnet/8.0'));
         }
@@ -219,7 +222,7 @@ export class V3Controller implements vscode.Disposable {
       return;
     }
 
-    let invocation: { dotnet: string; dll: string };
+    let invocation: { command: string; prefix: string[] };
     try {
       invocation = this.s.runner.resolveInvocation();
     } catch (e) {
@@ -239,8 +242,8 @@ export class V3Controller implements vscode.Disposable {
     this.pendingDirs = addDirs.filter((d) => !roots.includes(d));
     let sawDone = false;
     const run = new StreamRun({
-      dotnet: invocation.dotnet,
-      dll: invocation.dll,
+      command: invocation.command,
+      prefix: invocation.prefix,
       cwd,
       env: await this.s.runner.buildEnv(),
       prompt,
@@ -264,7 +267,7 @@ export class V3Controller implements vscode.Disposable {
       this.post({
         type: 'stream', runId: id, event: {
           type: 'error',
-          message: enoent ? `.NET was not found (${invocation.dotnet}). Solvra needs the .NET 8 runtime.` : `Could not start Solvra: ${errorText(e)}`,
+          message: enoent ? `Could not start ${invocation.command}. Solvra needs the .NET 8 runtime.` : `Could not start Solvra: ${errorText(e)}`,
           fix: enoent ? 'install_dotnet' : 'set_executable',
         },
       });
@@ -336,8 +339,8 @@ export class V3Controller implements vscode.Disposable {
     if (patch.maxTurns !== undefined) await cfg.update('maxTurns', Math.max(0, Math.floor(Number(patch.maxTurns) || 0)), g);
     if (patch.maxBudget !== undefined) await cfg.update('maxBudget', Math.max(0, Number(patch.maxBudget) || 0), g);
     if (patch.autoApprove !== undefined) await cfg.update('autoApprove', !!patch.autoApprove, g);
-    if (patch.solvraPath !== undefined) await cfg.update('solvraPath', patch.solvraPath.trim(), g);
-    if (patch.dotnetPath !== undefined) await cfg.update('dotnetPath', patch.dotnetPath.trim() || 'dotnet', g);
+    if (patch.executablePath !== undefined) await cfg.update('executablePath', patch.executablePath.trim(), g);
+    if (patch.dotnetPath !== undefined) await cfg.update('dotnetPath', patch.dotnetPath.trim(), g);
     hub.broadcast(async () => ({ type: 'settings', settings: await this.settingsState() }));
   }
 
@@ -377,8 +380,8 @@ export class V3Controller implements vscode.Disposable {
         maxTurns: cfg.get<number>('maxTurns', 0),
         maxBudget: cfg.get<number>('maxBudget', 0),
         autoApprove: cfg.get<boolean>('autoApprove', false),
-        solvraPath: cfg.get<string>('solvraPath', ''),
-        dotnetPath: cfg.get<string>('dotnetPath', 'dotnet'),
+        executablePath: cfg.get<string>('executablePath', ''),
+        dotnetPath: cfg.get<string>('dotnetPath', ''),
       },
       keys,
     };

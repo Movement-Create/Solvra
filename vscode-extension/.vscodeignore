@@ -13,3 +13,6 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 test/**
 webview-ui/**
+scripts/**
+backend/**/*.pdb
+*.vsix

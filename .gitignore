@@ -34,6 +34,7 @@ vscode-extension/dist/
 vscode-extension/out/
 vscode-extension/*.vsix
 vscode-extension/media/v3/
+vscode-extension/backend/
 vscode-extension/webview-ui/node_modules/
 vscode-extension/webview-ui/harness/out/
 

@@ -45,7 +45,7 @@ public sealed class ShellCommandHook : IHook
             final_text = context.FinalText,
         });
 
-        var psi = new ProcessStartInfo("/bin/bash")
+        var psi = new ProcessStartInfo(Solvra.Security.ShellLocator.Bash() ?? throw new InvalidOperationException(Solvra.Security.ShellLocator.WindowsBashHelp))
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,

@@ -68,7 +68,8 @@ export interface SettingsValues {
   maxTurns: number;
   maxBudget: number;
   autoApprove: boolean;
-  solvraPath: string;
+  /** solvra.executablePath: Solvra.dll, the solvra command, or a folder; empty = automatic. */
+  executablePath: string;
   dotnetPath: string;
 }
 

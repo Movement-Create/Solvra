@@ -1,3 +1,26 @@
+# Release 0.3.0 — 2026-11-07
+
+Branch `release/0.3.0` (worktree `release-0.3`), PR #7 on top of #6. The user authorized merging
+#3–#7 and publishing.
+
+- Backend on Windows: `ShellLocator` finds bash (Git for Windows; WSL's bash is skipped) and
+  `codex` (`codex.exe`, or npm's `codex.cmd` through `cmd.exe` with fixed arguments). Version 0.3.0.
+- Extension: `backend-locator.ts` searches `solvra.executablePath` (DLL, wrapper or folder; never a
+  `.cmd`), `solvraPath`, the bundled `backend/`, the installed location, then dev builds. It also
+  finds `dotnet` without PATH. ChatGPT is the default provider. "Sign in with Codex" installs the
+  CLI when missing.
+- Packaging: `vscode-extension/scripts/package.sh` builds a VSIX with the backend inside.
+  `scripts/build-release.sh` builds the VSIX, the macOS tar.gz and the Windows zip, plus SHA256SUMS.
+- macOS `install.sh` is one step: it sets up ChatGPT (and installs the Codex CLI) by default.
+  Windows: `install.ps1` plus "Install Solvra.cmd" (.NET, Git, Node/Codex, VS Code settings).
+- Verified on the devbox: the macOS installer in a throwaway HOME (OK from ChatGPT); the
+  installed VSIX in a clean VS Code (bundled backend, ChatGPT answered); 459 .NET, 24 host,
+  13 webview tests; pwsh checks of `install.ps1` helpers; the main live flow.
+- **Not verified on real macOS or Windows.** Untested there: `osascript` settings, the Windows
+  junction, winget, `dotnet-install.ps1`, `code.cmd`, `cmd.exe` launch of `codex.cmd`, Git Bash.
+
+---
+
 # VS Code extension fix and redesign: Phases 0–3 — 2026-11-07
 
 Stacked PRs, each with its own worktree under `/home/cosmos/wt/github/Solvra/`:

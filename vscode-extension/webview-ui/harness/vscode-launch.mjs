@@ -10,22 +10,33 @@ import { chromium } from 'playwright-core';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const ext = path.resolve(here, '../..');
 
-export async function launch({ out, tag, open, settings = {}, sessions = '/tmp/svsessions-live', prof = '/tmp/svprof' }) {
+// vsix: install that package into a fresh extensions folder instead of development mode (and do not
+// point the extension at this repository), to test exactly what users install.
+export async function launch({ out, tag, open, settings = {}, sessions = '/tmp/svsessions-live', prof = '/tmp/svprof', vsix = null }) {
   fs.mkdirSync(out, { recursive: true });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ELECTRON_|VSCODE_)/.test(k)));
+  env.SOLVRA_SESSIONS_DIR = sessions;
   fs.rmSync(prof, { recursive: true, force: true });
   fs.mkdirSync(path.join(prof, 'User'), { recursive: true });
   fs.mkdirSync(sessions, { recursive: true });
   fs.writeFileSync(path.join(prof, 'User', 'settings.json'), JSON.stringify({
     'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': false, 'telemetry.telemetryLevel': 'off',
     'update.mode': 'none', 'workbench.welcomePage.walkthroughs.openOnInstall': false, 'chat.disableAIFeatures': true,
-    'solvra.solvraPath': process.env.SOLVRA_ROOT || path.resolve(ext, '..'), 'solvra.model': process.env.SOLVRA_MODEL || 'chatgpt:gpt-5.6-luna',
+    ...(vsix ? {} : { 'solvra.solvraPath': process.env.SOLVRA_ROOT || path.resolve(ext, '..') }),
+    'solvra.model': process.env.SOLVRA_MODEL || 'chatgpt:gpt-5.6-luna',
     'solvra.maxBudget': 0.25, 'solvra.effort': 'low', ...settings,
   }, null, 2));
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(ELECTRON_|VSCODE_)/.test(k)));
-  env.SOLVRA_SESSIONS_DIR = sessions;
   const port = 9300 + Math.floor(Math.random() * 500);
-  const proc = spawn(process.env.VSCODE || '/tmp/svcode/code', ['--user-data-dir', prof, '--extensions-dir', '/tmp/svext',
-    '--extensionDevelopmentPath', ext, '--disable-extensions', '--remote-debugging-port=' + port, '--no-sandbox',
+  const code = process.env.VSCODE || '/tmp/svcode/code';
+  const extDir = vsix ? path.join(prof, 'extensions') : '/tmp/svext';
+  if (vsix) {
+    const { execFileSync } = await import('node:child_process');
+    // Through VS Code's CLI script (bin/code), as a user would install it.
+    execFileSync(path.join(path.dirname(code), 'bin', 'code'), ['--user-data-dir', prof, '--extensions-dir', extDir, '--install-extension', vsix, '--force'], { env, stdio: 'inherit' });
+  }
+  const mode = vsix ? [] : ['--extensionDevelopmentPath', ext, '--disable-extensions'];
+  const proc = spawn(code, ['--user-data-dir', prof, '--extensions-dir', extDir,
+    ...mode, '--remote-debugging-port=' + port, '--no-sandbox',
     '--disable-gpu-sandbox', '--password-store=basic', '--new-window', open],
     { env, stdio: ['ignore', fs.openSync(path.join(out, `${tag}-vscode.log`), 'w'), fs.openSync(path.join(out, `${tag}-vscode.err.log`), 'w')] });
   process.on('exit', () => { try { proc.kill('SIGKILL'); } catch { /* gone */ } });

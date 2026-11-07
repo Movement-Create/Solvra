@@ -2,7 +2,9 @@
 # Solvra installer for macOS (Apple Silicon and Intel).
 #
 # Run from the extracted solvra-macos bundle:
-#   ./install.sh                 # CLI + VS Code extension (installs .NET 8 runtime if missing)
+#   ./install.sh                 # everything: CLI, VS Code extension, ChatGPT via your Codex sign-in
+#   ./install.sh --model gpt-5.6-luna   # pick the ChatGPT model (default gpt-5.6-sol)
+#   ./install.sh --no-chatgpt    # skip the ChatGPT setup (use ./configure-openai.sh for an API key)
 #   ./install.sh --no-vscode     # CLI only
 #   ./install.sh --no-cli        # VS Code extension only
 #   ./install.sh --no-dotnet     # never download .NET; fail if it is missing
@@ -20,16 +22,20 @@ PREFIX="${SOLVRA_PREFIX:-$HOME/.local}"
 INSTALL_CLI=1
 INSTALL_VSCODE=1
 ALLOW_DOTNET_DOWNLOAD=1
+SETUP_CHATGPT=1
+MODEL="gpt-5.6-sol"
 MARKER="# >>> solvra installer >>>"
 MARKER_END="# <<< solvra installer <<<"
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-cli) INSTALL_CLI=0 ;;
     --no-vscode) INSTALL_VSCODE=0 ;;
     --no-dotnet) ALLOW_DOTNET_DOWNLOAD=0 ;;
+    --no-chatgpt) SETUP_CHATGPT=0 ;;
+    --model) shift; MODEL="${1:?--model needs a value}" ;;
     --prefix) shift; PREFIX="${1:?--prefix needs a directory}" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -188,20 +194,29 @@ if [ "$INSTALL_VSCODE" = "1" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------- ChatGPT (Codex sign-in)
+CHATGPT_OK=0
+if [ "$SETUP_CHATGPT" = "1" ] && [ "$INSTALL_CLI" = "1" ]; then
+  say "Setting up ChatGPT through your Codex sign-in (no API key needed)…"
+  if SOLVRA_PREFIX="$PREFIX" "$BUNDLE_DIR/configure-codex.sh" --model "$MODEL" --quiet-end; then
+    CHATGPT_OK=1
+  else
+    warn "ChatGPT setup did not finish. Fix the problem above, then run: ./configure-codex.sh"
+  fi
+fi
+
 # ---------------------------------------------------------------- summary
 echo ""
 say "Done."
 if [ "$INSTALL_CLI" = "1" ]; then
-  echo "  CLI:      $BIN/solvra   (open a new terminal, then: solvra --help)"
+  echo "  CLI:      $BIN/solvra   (open a new terminal, then: solvra chat)"
 fi
 if [ "$VSCODE_OK" = "1" ]; then
-  echo "  VS Code:  extension installed; restart VS Code and open a folder."
-  case "$DOTNET_DIR" in
-    /usr/local/share/dotnet) ;;  # official .pkg: on PATH via /etc/paths.d/dotnet
-    *) echo "            If the extension reports 'Could not start Solvra', set in VS Code settings:"
-       echo "              \"solvra.dotnetPath\": \"$DOTNET\"" ;;
-  esac
+  echo "  VS Code:  quit and reopen VS Code, open a folder, then click the Solvra icon in the Activity Bar."
 fi
-echo "  Next:     choose a provider for both the CLI and VS Code:"
-echo "              ./configure-codex.sh    ChatGPT subscription via your Codex sign-in (no API key)"
-echo "              ./configure-openai.sh   OpenAI-compatible API key"
+if [ "$CHATGPT_OK" = "1" ]; then
+  echo "  Model:    ChatGPT $MODEL via your Codex sign-in. Change it from the model menu in the chat."
+elif [ "$SETUP_CHATGPT" = "0" ]; then
+  echo "  Provider: run ./configure-codex.sh (ChatGPT, no API key) or ./configure-openai.sh (API key),"
+  echo "            or add a key in the chat: Settings → API keys."
+fi

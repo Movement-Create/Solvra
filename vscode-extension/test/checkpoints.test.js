@@ -89,7 +89,7 @@ test('folders: other roots and @ folders outside the working folder become --add
   assert.equal(agentPath(chips[0], '/w/app'), 'src');
   assert.equal(agentPath(chips[1], '/w/app'), '/data/sets');
   assert.match(buildPrompt('look', chips, '/w/app'), /Folders the user attached .*: src, \/data\/sets/);
-  const args = buildStreamArgs({ dll: 'S.dll', prompt: 'p', model: 'm', mode: 'ask', addDirs: ['/w/lib'], checkpointDir: '/tmp/c' });
+  const args = buildStreamArgs({ prefix: ['S.dll'], prompt: 'p', model: 'm', mode: 'ask', addDirs: ['/w/lib'], checkpointDir: '/tmp/c' });
   assert.equal(args[args.indexOf('--add-dir') + 1], '/w/lib');
   assert.equal(args[args.indexOf('--checkpoint-dir') + 1], '/tmp/c');
 });

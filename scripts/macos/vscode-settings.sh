@@ -41,7 +41,7 @@ JS
 }
 
 _manual_vscode() {
-  echo "  Add these to VS Code settings (Cmd+Shift+P → 'Preferences: Open User Settings (JSON)'):"
+  echo "  Add these to VS Code's settings.json (Code → Settings → Settings, then the {} icon at the top right):"
   echo "    \"solvra.executablePath\": \"$WRAPPER\","
   echo "    \"solvra.provider\": \"$1\","
   echo "    \"solvra.model\": \"$2\""

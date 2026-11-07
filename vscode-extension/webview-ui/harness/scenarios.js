@@ -1,6 +1,6 @@
 // Host messages replayed into the webview for each screenshot. Same shapes the extension sends.
 const settings = {
-  values: { model: 'chatgpt:gpt-5.6-sol', effort: 'medium', maxTurns: 0, maxBudget: 0.5, autoApprove: false, solvraPath: '', dotnetPath: 'dotnet' },
+  values: { model: 'chatgpt:gpt-5.6-sol', effort: 'medium', maxTurns: 0, maxBudget: 0.5, autoApprove: false, executablePath: '', dotnetPath: '' },
   keys: [
     { provider: 'anthropic', label: 'Anthropic', set: true, fromEnv: false, url: 'https://console.anthropic.com/settings/keys' },
     { provider: 'openai', label: 'OpenAI', set: false, fromEnv: true, url: 'https://platform.openai.com/api-keys' },
