@@ -45,17 +45,20 @@ echo "$EXT_VERSION-${SHORT_SHA:-local}" > "$STAGE/VERSION"
 cp "$VSIX" "$STAGE/"
 install -m 755 "$HERE/install.sh" "$STAGE/install.sh"
 install -m 755 "$HERE/configure-openai.sh" "$STAGE/configure-openai.sh"
+install -m 755 "$HERE/configure-codex.sh" "$STAGE/configure-codex.sh"
+install -m 644 "$HERE/vscode-settings.sh" "$STAGE/vscode-settings.sh"
 cat > "$STAGE/README.txt" <<EOF
 Solvra for macOS — extension $EXT_VERSION, backend $BACKEND_VERSION
 
   cd $NAME
   ./install.sh
-  ./configure-openai.sh     # OpenAI provider via the OpenCode Zen Go gateway, model glm-5.3
+  ./configure-codex.sh      # ChatGPT subscription via your Codex sign-in (no API key), or
+  ./configure-openai.sh     # OpenAI-compatible API key (default: OpenCode Zen Go gateway, glm-5.3)
 
 install.sh installs the Solvra CLI (~/.local/bin/solvra) and the VS Code extension
 (solvra.solvra-vscode), downloading the .NET 8 runtime to ~/.dotnet if it is missing.
-configure-openai.sh stores the API key in the macOS Keychain and points both the CLI and
-VS Code at the same provider settings. Both scripts accept --help.
+The configure scripts point both the CLI and VS Code at the same provider settings;
+configure-openai.sh keeps its API key in the macOS Keychain. All scripts accept --help.
 EOF
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 

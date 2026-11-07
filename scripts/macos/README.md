@@ -52,3 +52,17 @@ from your shell profile.
   `solvra.model`, so the extension and the CLI use identical settings. If `settings.json`
   contains comments, it prints the three settings for you to paste instead of editing the file.
 - Sends one tiny test request and reports errors such as an expired key.
+
+## Provider: ChatGPT subscription via Codex sign-in (no API key)
+
+```sh
+./configure-codex.sh                  # chatgpt provider, model gpt-5.6-sol
+./configure-codex.sh --model gpt-5.6-luna
+```
+
+This requires the Codex CLI (`brew install codex` or `npm install -g @openai/codex`). If Codex is
+not signed in yet, the script runs `codex login`. Solvra only reads `~/.codex/auth.json`;
+refreshing the login is left to `codex app-server`. The script writes `SOLVRA_PROVIDER=chatgpt`,
+the model and `SOLVRA_CODEX_BIN` to `~/.config/solvra/env.sh`, points VS Code at the wrapper,
+and sends a one-line test request. Both configure scripts update VS Code settings through the
+shared `vscode-settings.sh`; running either one switches the provider.

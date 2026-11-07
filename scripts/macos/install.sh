@@ -195,13 +195,13 @@ if [ "$INSTALL_CLI" = "1" ]; then
   echo "  CLI:      $BIN/solvra   (open a new terminal, then: solvra --help)"
 fi
 if [ "$VSCODE_OK" = "1" ]; then
-  echo "  VS Code:  restart VS Code, open a folder, then run"
-  echo "            'Solvra: Configure API Key' and 'Solvra: Pick Model' from the Command Palette."
+  echo "  VS Code:  extension installed; restart VS Code and open a folder."
   case "$DOTNET_DIR" in
     /usr/local/share/dotnet) ;;  # official .pkg: on PATH via /etc/paths.d/dotnet
     *) echo "            If the extension reports 'Could not start Solvra', set in VS Code settings:"
        echo "              \"solvra.dotnetPath\": \"$DOTNET\"" ;;
   esac
 fi
-echo "  CLI keys: export a provider key before running the CLI, e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY"
-echo "            (plus OPENAI_BASE_URL for an OpenAI-compatible gateway)."
+echo "  Next:     choose a provider for both the CLI and VS Code:"
+echo "              ./configure-codex.sh    ChatGPT subscription via your Codex sign-in (no API key)"
+echo "              ./configure-openai.sh   OpenAI-compatible API key"

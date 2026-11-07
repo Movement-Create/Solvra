@@ -92,47 +92,8 @@ if [ "$LIVE_TEST" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------- VS Code settings
-manual_vscode() {
-  echo "  Add these to VS Code settings (Cmd+Shift+P → 'Preferences: Open User Settings (JSON)'):"
-  echo "    \"solvra.executablePath\": \"$WRAPPER\","
-  echo "    \"solvra.provider\": \"openai\","
-  echo "    \"solvra.model\": \"$MODEL\""
-}
-
-if ! command -v osascript >/dev/null 2>&1; then
-  warn "osascript not available; update VS Code settings by hand."; manual_vscode
-else
-  JS="$(mktemp "${TMPDIR:-/tmp}/solvra-settings.XXXXXX")"
-  trap 'rm -f "$JS"' EXIT
-  cat > "$JS" <<'JS'
-// argv: current settings text, executable path, model. Returns new text, or "!error: ...".
-function run(argv) {
-  var text = argv[0], obj = {};
-  if (text.replace(/\s/g, '') !== '') {
-    try { obj = JSON.parse(text); } catch (e) { return '!error: settings.json has comments or trailing commas'; }
-    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return '!error: settings.json is not an object';
-  }
-  obj['solvra.executablePath'] = argv[1];
-  obj['solvra.provider'] = 'openai';
-  obj['solvra.model'] = argv[2];
-  return JSON.stringify(obj, null, 4);
-}
-JS
-  CURRENT=""
-  if [ -f "$SETTINGS" ]; then CURRENT="$(cat "$SETTINGS")"; fi
-  NEW="$(osascript -l JavaScript "$JS" "$CURRENT" "$WRAPPER" "$MODEL" 2>&1 || echo '!error: osascript failed')"
-  case "$NEW" in
-    '!error'*)
-      warn "Could not update VS Code settings automatically (${NEW#!error: })."; manual_vscode ;;
-    *)
-      mkdir -p "$(dirname "$SETTINGS")"
-      if [ -f "$SETTINGS" ]; then cp "$SETTINGS" "$SETTINGS.solvra-backup"; fi
-      printf '%s\n' "$NEW" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-      say "VS Code settings updated: solvra.executablePath, solvra.provider=openai, solvra.model=$MODEL"
-      if [ -f "$SETTINGS.solvra-backup" ]; then echo "  (previous settings saved as $SETTINGS.solvra-backup)"; fi
-      ;;
-  esac
-fi
+. "$(cd "$(dirname "$0")" && pwd)/vscode-settings.sh"
+update_vscode_settings openai "$MODEL"
 
 echo ""
 say "Done. Open a new terminal and run: solvra chat"
