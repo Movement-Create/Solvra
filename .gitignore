@@ -43,3 +43,4 @@ vscode-extension/webview-ui/harness/out/
 ## OS
 .DS_Store
 Thumbs.db
+dist/
