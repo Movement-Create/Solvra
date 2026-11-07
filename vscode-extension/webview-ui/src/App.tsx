@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { MotionConfig } from 'motion/react';
 import type { HostMessage } from '../../src/protocol';
 import { initialState, isRunning, nextMode, reducer, type Action } from './store';
@@ -14,8 +14,9 @@ import { MemoryView, ToolsView } from './components/Panels';
 import { ErrorLine } from './components/ErrorLine';
 
 export function App() {
-  const persisted = getPersisted<{ mode: typeof initialState.mode }>();
-  const [state, dispatch] = useReducer(reducer, { ...initialState, mode: persisted.mode ?? initialState.mode });
+  // A mode the user picked in this panel earlier (kept across reloads); read once at mount.
+  const [persisted] = useState(() => getPersisted<{ mode: typeof initialState.mode }>());
+  const [state, dispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -26,15 +27,18 @@ export function App() {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  useEffect(() => { persist({ mode: state.mode }); }, [state.mode]);
-
-  // The host keeps the mode for its next run; the persisted mode wins over the default after init.
+  // Until init arrives the mode is only a placeholder: never persist it, or the settings default
+  // (Ask, or Auto when solvra.autoApprove is on) would be overridden by it.
   const initialised = useRef(false);
   useEffect(() => {
     if (!state.ready || initialised.current) return;
     initialised.current = true;
-    if (persisted.mode && persisted.mode !== state.mode) dispatch({ type: 'local/setMode', mode: persisted.mode });
+    if (persisted.mode && persisted.mode !== state.mode) {
+      dispatch({ type: 'local/setMode', mode: persisted.mode });
+      post({ type: 'setMode', mode: persisted.mode });
+    }
   }, [state.ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialised.current) persist({ mode: state.mode }); }, [state.mode, state.ready]);
 
   const running = isRunning(state);
 
