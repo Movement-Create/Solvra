@@ -35,3 +35,20 @@ Re-running the script is safe; it replaces the release and does not add the PATH
 To uninstall: `code --uninstall-extension solvra.solvra-vscode`, then
 `rm -rf ~/.local/opt/solvra ~/.local/bin/solvra`, then delete the `solvra installer` block
 from your shell profile.
+
+## Provider: OpenAI-compatible (same as the devbox)
+
+```sh
+./configure-openai.sh                 # provider openai, OpenCode Zen Go gateway, model glm-5.3
+./configure-openai.sh --reset-key     # replace an expired key
+./configure-openai.sh --base-url https://api.openai.com/v1 --model gpt-4.1   # plain OpenAI
+```
+
+- Prompts once for the API key and stores it in the login Keychain (service `solvra-openai`).
+- Writes non-secret settings to `~/.config/solvra/env.sh`. The `~/.local/bin/solvra` wrapper
+  loads that file and reads the key from the Keychain on each launch. OpenAI variables are not
+  added to your global shell, so other OpenAI tools are unaffected.
+- Sets VS Code's `solvra.executablePath` to the wrapper, plus `solvra.provider` and
+  `solvra.model`, so the extension and the CLI use identical settings. If `settings.json`
+  contains comments, it prints the three settings for you to paste instead of editing the file.
+- Sends one tiny test request and reports errors such as an expired key.

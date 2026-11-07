@@ -10,7 +10,7 @@ VSIX="$(realpath "${1:?usage: build-bundle.sh <vsix> [out-dir]}")"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(realpath -m "${2:-$HERE/../../dist}")"
 EXT_VERSION="$(basename "$VSIX" .vsix | sed 's/^solvra-vscode-//')"
-NAME="solvra-macos-$EXT_VERSION"
+NAME="solvra-macos-$EXT_VERSION${BUNDLE_REV:+-$BUNDLE_REV}"   # BUNDLE_REV=r2 for a re-spin
 STAGE="$OUT/$NAME"
 
 rm -rf "$STAGE"
@@ -44,15 +44,18 @@ echo "$EXT_VERSION-${SHORT_SHA:-local}" > "$STAGE/VERSION"
 
 cp "$VSIX" "$STAGE/"
 install -m 755 "$HERE/install.sh" "$STAGE/install.sh"
+install -m 755 "$HERE/configure-openai.sh" "$STAGE/configure-openai.sh"
 cat > "$STAGE/README.txt" <<EOF
 Solvra for macOS — extension $EXT_VERSION, backend $BACKEND_VERSION
 
   cd $NAME
   ./install.sh
+  ./configure-openai.sh     # OpenAI provider via the OpenCode Zen Go gateway, model glm-5.3
 
-Installs the Solvra CLI (~/.local/bin/solvra) and the VS Code extension
-(solvra.solvra-vscode). Downloads the .NET 8 runtime to ~/.dotnet if it is missing.
-Run ./install.sh --help for options.
+install.sh installs the Solvra CLI (~/.local/bin/solvra) and the VS Code extension
+(solvra.solvra-vscode), downloading the .NET 8 runtime to ~/.dotnet if it is missing.
+configure-openai.sh stores the API key in the macOS Keychain and points both the CLI and
+VS Code at the same provider settings. Both scripts accept --help.
 EOF
 (cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 

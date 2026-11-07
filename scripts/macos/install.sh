@@ -124,6 +124,8 @@ if [ "$INSTALL_CLI" = "1" ]; then
 #!/bin/bash
 # solvra-macos-installer: launches the Solvra backend with the .NET 8 runtime.
 export DOTNET_ROOT="\${DOTNET_ROOT:-$DOTNET_DIR}"
+# Provider settings (written by configure-openai.sh; the API key itself stays in the Keychain).
+if [ -r "\$HOME/.config/solvra/env.sh" ]; then . "\$HOME/.config/solvra/env.sh"; fi
 exec "$DOTNET" "$OPT/current/Solvra.dll" "\$@"
 EOF
   chmod 755 "$WRAPPER"
