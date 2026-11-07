@@ -177,7 +177,7 @@ async def main():
                             sid=str(sid_), cid=cid, q=inp.get("question"), ans=inp.get("choice", inp.get("answer")), conf=inp.get("confidence"), raw=json.dumps(inp), out=out)
             counts = await (await s.run("MATCH (r:Run {trace_id:$t})-[:HAS_TRACE]->(rt)-[:HAS_STEP]->(st) OPTIONAL MATCH (st)-[:USES_TOOL]->(tc) OPTIONAL MATCH (st)-[:DECIDED]->(d) RETURN count(DISTINCT st) AS steps, count(DISTINCT tc) AS tool_calls, count(DISTINCT d) AS decisions", t=a.trace_id)).single()
     await driver.close()
-    print(f"loaded: steps={counts['steps']} tool_calls={counts['tool_calls']} decisions={counts['decisions']} (decisions are expected 0: no decide tool)")
+    print(f"loaded: steps={counts['steps']} tool_calls={counts['tool_calls']} decisions={counts['decisions']} (decisions come from the decide tool; 0 for runs before telemetry package B)")
     print("fields left null because the telemetry does not carry them:"); [print("  -", m) for m in MISSING]
 
 asyncio.run(main())
