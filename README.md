@@ -65,6 +65,10 @@ dotnet run --project src/Solvra -- chat
 --no-tools       Generation-only mode: no tools, hooks, skills, memory or instruction files
 --ephemeral      Don't persist a conversation transcript
 --json           Output result as JSON (text, stop_reason, error, session_id, usage)
+--output-format  text (default), json, or stream-json: JSON events on stdout and approvals /
+                 cancel on stdin, for UIs. See docs/stream-json.md
+--allow-rule     With stream-json: an approval remembered for the session (edit, execute:node, …)
+--title          Title for a new session (default: first line of the prompt)
 --system         System prompt (replaces the default coding instructions)
 --session <id>   Continue (or create) a named session
 --no-session     Don't write a session file

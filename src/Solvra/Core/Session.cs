@@ -19,6 +19,30 @@ public record SessionEvent
 /// <summary>Integrity and provenance fields stored next to a tool result (never sent to the model).</summary>
 public record ToolResultMeta(int OutputBytes, string OutputSha256, bool Truncated, string? SpillPath, int? ExitCode, IReadOnlyList<object>? Records);
 
+/// <summary>One row of <c>session list</c>: the same title rule everywhere (CLI, --json, VS Code).</summary>
+public sealed record SessionSummary(string Id, string Title, string CreatedAt, string UpdatedAt, string Model, string Provider);
+
+/// <summary>How session titles are made and shown.</summary>
+public static class SessionTitles
+{
+    public const int MaxLength = 60;
+    public const string Untitled = "Untitled";
+
+    /// <summary>A title from free text: first non-blank line, whitespace collapsed, at most 60 characters.</summary>
+    public static string? FromText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var line = text.Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        line = System.Text.RegularExpressions.Regex.Replace(line, @"\s+", " ");
+        if (line.Length == 0) return null;
+        return line.Length > MaxLength ? line[..(MaxLength - 1)].TrimEnd() + "…" : line;
+    }
+
+    /// <summary>The stored title, else one derived from the first user message, else "Untitled".</summary>
+    public static string Display(string? storedTitle, string? firstUserText) =>
+        FromText(storedTitle) ?? FromText(firstUserText) ?? Untitled;
+}
+
 public record SessionInfo
 {
     public required SessionConfig Config { get; init; }
@@ -270,6 +294,11 @@ public sealed class SessionManager
                         config = JsonSerializer.Deserialize<SessionConfig>(configEl.GetRawText(), JsonOptions);
                     break;
 
+                case "session_title":
+                    if (config != null && evt.Data.TryGetProperty("title", out var titleEl) && titleEl.ValueKind == JsonValueKind.String)
+                        config = config with { Title = titleEl.GetString() };
+                    break;
+
                 case "user_message":
                     // Flush any pending tool results before user message
                     FlushToolMessages(messages, ref pendingToolUses, ref pendingToolResults);
@@ -429,6 +458,63 @@ public sealed class SessionManager
         }
 
         return configs.OrderByDescending(c => c.CreatedAt).ToList();
+    }
+
+    /// <summary>Rename by appending a session_title event; existing lines are never rewritten.</summary>
+    public async Task RenameAsync(string sessionId, string title)
+    {
+        var path = SessionPath(sessionId);
+        if (!File.Exists(path)) throw new FileNotFoundException($"Session {sessionId} not found", path);
+        var clean = SessionTitles.FromText(title) ?? throw new ArgumentException("Title must not be empty.", nameof(title));
+        await AppendEventAsync(new SessionConfig { Id = sessionId, CreatedAt = "", FilePath = path }, new SessionEvent
+        {
+            Type = "session_title",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            Data = JsonSerializer.SerializeToElement(new { title = clean }, JsonOptions)
+        });
+    }
+
+    /// <summary>Sessions newest first, with display titles (renames applied, else the first user message).</summary>
+    public async Task<IReadOnlyList<SessionSummary>> ListSummariesAsync()
+    {
+        if (!Directory.Exists(_sessionsDir)) return [];
+        var rows = new List<SessionSummary>();
+        foreach (var file in Directory.GetFiles(_sessionsDir, "*.jsonl"))
+        {
+            try
+            {
+                SessionConfig? config = null;
+                string? renamed = null, firstUser = null;
+                using var reader = new StreamReader(file);
+                string? line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    // Only three event types matter; skip the rest without parsing them.
+                    var isStart = config == null && line.Contains("\"session_start\"", StringComparison.Ordinal);
+                    var isTitle = line.StartsWith("{\"type\":\"session_title\"", StringComparison.Ordinal);
+                    var isUser = firstUser == null && line.StartsWith("{\"type\":\"user_message\"", StringComparison.Ordinal);
+                    if (!isStart && !isTitle && !isUser) continue;
+                    SessionEvent? evt;
+                    try { evt = JsonSerializer.Deserialize<SessionEvent>(line, JsonOptions); }
+                    catch (JsonException) { continue; }
+                    if (evt == null) continue;
+                    if (evt.Type == "session_start" && evt.Data.TryGetProperty("config", out var c))
+                        config = JsonSerializer.Deserialize<SessionConfig>(c.GetRawText(), JsonOptions);
+                    else if (evt.Type == "session_title" && evt.Data.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String)
+                        renamed = t.GetString();
+                    else if (evt.Type == "user_message" && evt.Data.TryGetProperty("content", out var u))
+                        firstUser = u.ValueKind == JsonValueKind.String ? u.GetString()
+                            : u.ValueKind == JsonValueKind.Array ? u.EnumerateArray()
+                                .Where(b => b.TryGetProperty("text", out _)).Select(b => b.GetProperty("text").GetString()).FirstOrDefault()
+                            : null;
+                }
+                if (config == null) continue;
+                rows.Add(new SessionSummary(config.Id, SessionTitles.Display(renamed ?? config.Title, firstUser), config.CreatedAt,
+                    File.GetLastWriteTimeUtc(file).ToString("o"), config.Model, config.Provider));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { /* skip unreadable sessions */ }
+        }
+        return rows.OrderByDescending(r => r.UpdatedAt, StringComparer.Ordinal).ToList();
     }
 
     public Task DeleteAsync(string sessionId)

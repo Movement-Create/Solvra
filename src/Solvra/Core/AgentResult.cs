@@ -24,6 +24,14 @@ public record AgentRunOptions
     public Func<ToolCall, Task<bool>>? OnPermissionRequest { get; init; }
     public Action<ToolCall>? OnToolCall { get; init; }
     public Action<ToolResult>? OnToolResult { get; init; }
+    /// <summary>Reasoning ("thinking") deltas, streamed when the provider sends them.</summary>
+    public Action<string>? OnThinking { get; init; }
+    /// <summary>After each model call: cumulative usage, cumulative cost and the tokens sent in that call.</summary>
+    public Action<TokenUsage, decimal, int>? OnUsage { get; init; }
+    /// <summary>Live observer for this run and its subagents (stream-json); null keeps the CLI behaviour.</summary>
+    public IAgentObserver? Observer { get; init; }
+    /// <summary>Id of this agent in observer events: "main" for the top-level run.</summary>
+    public string AgentId { get; init; } = "main";
     public int SubagentDepth { get; init; }
 
     /// <summary>Whether this run may delegate work through the agent tool.</summary>

@@ -65,45 +65,79 @@ public static class AgentHost
     /// "ask" mode still apply), its working directory, provider, allow/deny lists and budget,
     /// and carry their nesting depth so <see cref="AgentTool.MaxSubagentDepth"/> is enforced.
     /// </summary>
-    private static void ConfigureSubagents(AgentSubsystems s)
+    private static void ConfigureSubagents(AgentSubsystems s) =>
+        AgentTool.RunAgentDelegate = SubagentRunner(s.Config, s.Router, s.Registry, s.HookEngine, s.AuditLogger, s.Tracer);
+
+    /// <summary>The subagent runner used by the agent tool (also constructed directly by tests).</summary>
+    internal static Func<SubagentRequest, CancellationToken, Task<string>> SubagentRunner(
+        SolvraConfig config, ModelRouter router, ToolRegistry registry, HookEngine hookEngine, AuditLogger auditLogger, Tracer tracer)
     {
-        AgentTool.RunAgentDelegate = async (req, ct) =>
+        return async (req, ct) =>
         {
             var parent = req.Parent;
-            var model = req.Model ?? parent.Model ?? s.Config.Model;
+            var model = req.Model ?? parent.Model ?? config.Model;
             var provider = ModelRouter.ChooseProvider(model, explicitProvider: null,
-                configuredProvider: parent.Provider ?? s.Config.Provider, configuredIsExplicit: true);
+                configuredProvider: parent.Provider ?? config.Provider, configuredIsExplicit: true);
 
-            var loop = new AgentLoop(s.Router, s.Registry, s.HookEngine, s.AuditLogger, tracer: s.Tracer);
-            var result = await loop.RunAsync(new AgentRunOptions
+            var loop = new AgentLoop(router, registry, hookEngine, auditLogger, tracer: tracer);
+            // With a live observer (stream-json) the child streams its own text, tools, approvals
+            // and usage under its own agent id, nested under the parent.
+            var observer = parent.Observer;
+            var agentId = observer?.SubagentStarted(parent.AgentId, parent.OperationId, req.Title ?? AgentTool.SubagentTitle(null, req.Prompt));
+            var hooks = agentId is null ? null : observer!.HooksFor(agentId);
+            AgentRunResult result;
+            try
             {
-                Prompt = req.Prompt,
-                Session = new SessionConfig
+                result = await loop.RunAsync(new AgentRunOptions
                 {
-                    Id = Guid.NewGuid().ToString(),
-                    CreatedAt = DateTime.UtcNow.ToString("o"),
-                    Model = model,
-                    Provider = provider,
-                    Effort = req.Effort,
-                    MaxTurns = req.MaxTurns,
-                    MaxBudgetUsd = s.Config.MaxBudgetUsd,
-                    MaxTokens = s.Config.MaxTokens,
-                    PermissionMode = parent.Session.PermissionModeStr,
-                    AllowedTools = parent.Session.AllowedTools,
-                    DisallowedTools = parent.Session.DisallowedTools,
-                },
-                SystemPrompt = req.SystemPrompt,
-                Streaming = false,
-                SubagentDepth = req.Depth,
-                SubagentsEnabled = s.Config.SubagentsEnabled,
-                SubagentModel = s.Config.SubagentModel,
-                SubagentEffort = s.Config.ParsedSubagentEffort,
-                Deadline = parent.Deadline,
-                ProcessTracker = parent.ProcessTracker,
-                OnPermissionRequest = parent.PermissionRequest,
-                Cwd = parent.Cwd,
-                LogToSession = false,
-            }, ct);
+                    Prompt = req.Prompt,
+                    Session = new SessionConfig
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        CreatedAt = DateTime.UtcNow.ToString("o"),
+                        Model = model,
+                        Provider = provider,
+                        Effort = req.Effort,
+                        MaxTurns = req.MaxTurns,
+                        MaxBudgetUsd = config.MaxBudgetUsd,
+                        MaxTokens = config.MaxTokens,
+                        PermissionMode = parent.Session.PermissionModeStr,
+                        AllowedTools = parent.Session.AllowedTools,
+                        DisallowedTools = parent.Session.DisallowedTools,
+                    },
+                    SystemPrompt = req.SystemPrompt,
+                    Streaming = hooks is not null,
+                    OnText = hooks?.OnText,
+                    OnThinking = hooks?.OnThinking,
+                    OnToolCall = hooks?.OnToolCall,
+                    OnToolResult = hooks?.OnToolResult,
+                    OnUsage = hooks?.OnUsage,
+                    Observer = observer,
+                    AgentId = agentId ?? "main",
+                    SubagentDepth = req.Depth,
+                    SubagentsEnabled = config.SubagentsEnabled,
+                    SubagentModel = config.SubagentModel,
+                    SubagentEffort = config.ParsedSubagentEffort,
+                    Deadline = parent.Deadline,
+                    ProcessTracker = parent.ProcessTracker,
+                    // No parent approver means auto or fail-closed; keep that rather than asking through the stream.
+                    OnPermissionRequest = hooks is null || parent.PermissionRequest is null ? parent.PermissionRequest : hooks.OnPermissionRequest,
+                    Cwd = parent.Cwd,
+                    LogToSession = false,
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                if (agentId is not null) observer!.SubagentEnded(agentId, "cancelled");
+                throw;
+            }
+            catch
+            {
+                if (agentId is not null) observer!.SubagentEnded(agentId, "error");
+                throw;
+            }
+            if (agentId is not null)
+                observer!.SubagentEnded(agentId, result.StopReason == StopReason.Error ? "error" : "ok");
 
             return result.StopReason switch
             {

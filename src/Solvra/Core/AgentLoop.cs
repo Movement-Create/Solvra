@@ -319,7 +319,7 @@ public sealed class AgentLoop
                             if (separatorPending) { options.OnText?.Invoke("\n\n"); separatorPending = false; }
                             streamedAnyText = true;
                             options.OnText?.Invoke(delta);
-                        }, ct)
+                        }, options.OnThinking, ct)
                         : await provider.CompleteAsync(completionOptions, ct),
                     new RetryOptions
                     {
@@ -393,6 +393,11 @@ public sealed class AgentLoop
             progress.ActiveOperationType = null;
 
             var currentCost = provider.EstimateCost(resolvedModel, totalUsage.InputTokens, totalUsage.OutputTokens);
+            options.OnUsage?.Invoke(totalUsage, currentCost,
+                response.Usage.InputTokens > 0 ? response.Usage.InputTokens : sentTokens + overheadTokens);
+
+            if (!options.Streaming && !string.IsNullOrEmpty(response.Reasoning))
+                options.OnThinking?.Invoke(response.Reasoning);
 
             // Non-streaming callers still get the text.
             if (!options.Streaming && !string.IsNullOrEmpty(response.Text))
@@ -546,7 +551,7 @@ public sealed class AgentLoop
     /// <summary>One streaming model call collected into an <see cref="LlmResponse"/>.</summary>
     private static async Task<LlmResponse> StreamOnceAsync(
         IProvider provider, CompletionOptions completionOptions, IReadOnlyList<Message> sent, int overheadTokens,
-        Action<string> onText, CancellationToken ct)
+        Action<string> onText, Action<string>? onReasoning, CancellationToken ct)
     {
         var text = new StringBuilder();
         var reasoning = new StringBuilder();
@@ -565,6 +570,7 @@ public sealed class AgentLoop
                     break;
                 case StreamReasoning r:
                     reasoning.Append(r.Delta);
+                    onReasoning?.Invoke(r.Delta);
                     break;
                 case StreamToolUseStart start:
                     if (toolCalls.Any(t => t.Id == start.Id)) break; // tolerate a repeated start
@@ -621,7 +627,7 @@ public sealed class AgentLoop
         while (i < calls.Count)
         {
             var j = i;
-            while (j < calls.Count && IsParallelSafe(calls[j])) j++;
+            while (j < calls.Count && IsParallelSafe(calls[j], options)) j++;
             if (j - i >= 2)
             {
                 var batch = Enumerable.Range(i, j - i)
@@ -638,11 +644,14 @@ public sealed class AgentLoop
         return new ToolBatch(outcomes.Select(o => o.Result).ToList(), outcomes.Select(o => o.Image).OfType<ImageContent>().ToList());
     }
 
-    private bool IsParallelSafe(ToolCall tc)
+    private bool IsParallelSafe(ToolCall tc, AgentRunOptions options)
     {
         var tool = _toolRegistry.GetTool(tc.Name);
-        return tool != null
-            && tool.PermissionLevel is PermissionLevel.Read or PermissionLevel.Network
+        if (tool == null) return false;
+        // With a live observer (stream-json) several subagents from one turn run at once; each
+        // asks for its own approvals. The console CLI keeps them sequential so prompts never interleave.
+        if (tool.Name == "agent") return options.Observer?.ParallelSubagents == true;
+        return tool.PermissionLevel is PermissionLevel.Read or PermissionLevel.Network
             && tool.Name != "todo"; // ordered state updates
     }
 
@@ -696,6 +705,8 @@ public sealed class AgentLoop
                     SubagentDepth = options.SubagentDepth,
                     SubagentsEnabled = options.SubagentsEnabled,
                     PermissionRequest = options.OnPermissionRequest,
+                    Observer = options.Observer,
+                    AgentId = options.AgentId,
                     Model = options.SubagentModel ?? options.Session.Model,
                     Provider = options.SubagentModel is null ? options.Session.Provider : null,
                     Effort = options.SubagentEffort ?? options.Session.Effort,
@@ -747,6 +758,10 @@ public sealed class AgentLoop
                     execContext.Output.Truncated, execContext.Output.SpillPath, result.ExitCode, result.Records);
             }
         }
+
+        // A denial can carry the user's instructions ("No, do X instead"); the model sees them with the refusal.
+        if (result.IsError && options.Observer?.TakeDenialNote(tc.Id) is { Length: > 0 } note)
+            result = result with { Output = $"{result.Output}\nThe user said: {note}" };
 
         if (options.LogToSession)
             await SafeLog(() => _sessionManager.AppendToolResultAsync(options.Session, tc.Id, result.Output, result.IsError, meta));
