@@ -78,7 +78,7 @@ public class CodeRunTool : ToolBase
         if (!string.IsNullOrEmpty(result.Stderr))
             output += (string.IsNullOrEmpty(output) ? "" : "\n") + result.Stderr;
 
-        output = ToolOutput.Limit(output, "code_run");
+        output = ToolOutput.Limit(output, "code_run", context);
 
         if (generatedFiles.Count > 0)
             output += $"\n\n[Generated files in {tempDir}: {string.Join(", ", generatedFiles)}]";
@@ -88,7 +88,12 @@ public class CodeRunTool : ToolBase
         if (result.TimedOut)
             output = $"Execution timed out after {timeoutMs}ms\n{output}";
 
-        return new ToolExecuteResult(output, result.ExitCode != 0 || result.TimedOut);
+        return new ToolExecuteResult(output, result.ExitCode != 0 || result.TimedOut)
+        {
+            ExitCode = result.ExitCode,
+            Records = [new { kind = "code", language, code_sha256 = ToolOutput.Sha256(code), exit_code = result.ExitCode,
+                             stdout_sha256 = ToolOutput.Sha256(result.Stdout), generated_files = generatedFiles, timed_out = result.TimedOut }]
+        };
     }
 
     private static void TryDelete(string dir)

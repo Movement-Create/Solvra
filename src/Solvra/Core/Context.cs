@@ -158,7 +158,8 @@ Verification discipline:
     /// AGENTS.md / CLAUDE.md / SOLVRA.md / .solvra.md from the git root (or filesystem root)
     /// down to <paramref name="cwd"/>. Each file is labelled with its path.
     /// </summary>
-    public static async Task<string?> LoadProjectInstructionsAsync(string cwd, CancellationToken ct = default)
+    /// <summary>The instruction files the system prompt is built from, in load order (global first, then git root down to cwd).</summary>
+    public static List<string> ProjectInstructionFiles(string cwd)
     {
         var files = new List<string>();
 
@@ -186,6 +187,12 @@ Verification discipline:
                 if (File.Exists(path) && !files.Contains(path)) files.Add(path);
             }
 
+        return files;
+    }
+
+    public static async Task<string?> LoadProjectInstructionsAsync(string cwd, CancellationToken ct = default)
+    {
+        var files = ProjectInstructionFiles(cwd);
         if (files.Count == 0) return null;
 
         var sb = new StringBuilder("# Project Instructions\n\nFollow these instructions from the user and the repository. More specific (deeper) files take precedence.\n");

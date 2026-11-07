@@ -81,6 +81,7 @@ public class GrepTool : ToolBase
         var results = 0;
         var filesMatched = 0;
         var truncated = false;
+        var records = new List<object>();
 
         await Task.Run(() =>
         {
@@ -105,6 +106,7 @@ public class GrepTool : ToolBase
                     if (mode != "content") continue;
                     if (results >= maxResults) { truncated = true; break; }
                     results++;
+                    records.Add(new { kind = "match", path = full, line = i + 1 });
 
                     var from = Math.Max(0, i - contextLines);
                     var to = Math.Min(lines.Length - 1, i + contextLines);
@@ -120,8 +122,8 @@ public class GrepTool : ToolBase
 
                 if (matchCount == 0) continue;
                 filesMatched++;
-                if (mode == "files") { output.AppendLine(rel); results++; }
-                else if (mode == "count") { output.Append(rel).Append(':').Append(matchCount).AppendLine(); results++; }
+                if (mode == "files") { output.AppendLine(rel); results++; records.Add(new { kind = "file", path = full, matches = matchCount }); }
+                else if (mode == "count") { output.Append(rel).Append(':').Append(matchCount).AppendLine(); results++; records.Add(new { kind = "file", path = full, matches = matchCount }); }
             }
         }, ct);
 
@@ -131,6 +133,6 @@ public class GrepTool : ToolBase
         var text = output.ToString().TrimEnd();
         if (truncated)
             text += $"\n[Stopped after {maxResults} results; narrow the pattern/glob or raise max_results.]";
-        return new ToolExecuteResult(ToolOutput.Limit(text, "grep"), false);
+        return new ToolExecuteResult(ToolOutput.Limit(text, "grep", context), false) { Records = records };
     }
 }

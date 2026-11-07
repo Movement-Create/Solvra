@@ -68,19 +68,31 @@ public class BashTool : ToolBase
         {
             var limit = Math.Clamp(timeout ?? _sandbox.Config.TimeoutMs, 1, SandboxConfig.MaxTimeoutMs);
             return new ToolExecuteResult(
-                ToolOutput.Limit(output, "bash") +
+                ToolOutput.Limit(output, "bash", context) +
                 $"\n[Command timed out after {limit} ms and was killed. Raise timeout_ms (max {SandboxConfig.MaxTimeoutMs}) or use background=true.]",
-                true);
+                true) { ExitCode = result.ExitCode, Records = [CommandRecord(command, cwd, result)] };
         }
 
-        output = ToolOutput.Limit(output, "bash");
+        output = ToolOutput.Limit(output, "bash", context);
         if (result.ExitCode != 0)
             output += (output.Length > 0 ? "\n" : "") + $"[exit code {result.ExitCode}]";
         else if (output.Length == 0)
             output = "(no output)";
 
-        return new ToolExecuteResult(output, result.ExitCode != 0);
+        return new ToolExecuteResult(output, result.ExitCode != 0) { ExitCode = result.ExitCode, Records = [CommandRecord(command, cwd, result)] };
     }
+
+    private static object CommandRecord(string command, string cwd, SandboxExecResult result) => new
+    {
+        kind = "command",
+        command_sha256 = ToolOutput.Sha256(command),
+        cwd,
+        exit_code = result.ExitCode,
+        stdout_sha256 = ToolOutput.Sha256(result.Stdout),
+        stdout_bytes = System.Text.Encoding.UTF8.GetByteCount(result.Stdout),
+        stderr_bytes = System.Text.Encoding.UTF8.GetByteCount(result.Stderr),
+        timed_out = result.TimedOut
+    };
 
     private async Task<ToolExecuteResult> StartBackgroundAsync(string command, string cwd, ToolExecutionContext context, CancellationToken ct)
     {

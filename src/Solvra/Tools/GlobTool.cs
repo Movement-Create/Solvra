@@ -65,7 +65,10 @@ public class GlobTool : ToolBase
         var text = string.Join('\n', ordered.Take(maxResults).Select(m => m.Rel));
         if (ordered.Count > maxResults)
             text += $"\n[{ordered.Count - maxResults} more files not shown; narrow the pattern.]";
-        return new ToolExecuteResult(text, false);
+        return new ToolExecuteResult(text, false)
+        {
+            Records = ordered.Take(maxResults).Select(m => (object)new { kind = "file", path = Path.Combine(basePath, m.Rel) }).ToList()
+        };
     }
 
     /// <summary>

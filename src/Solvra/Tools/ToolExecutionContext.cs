@@ -38,4 +38,17 @@ public record ToolExecutionContext(
     public string? Provider { get; init; }
     public Models.EffortLevel Effort { get; init; } = Models.EffortLevel.Medium;
     public int MaxTurns { get; init; }
+
+    /// <summary>Where capped tool outputs are saved in full (null = system temp).</summary>
+    public string? SpillDir { get; init; }
+
+    /// <summary>Filled by <see cref="ToolOutput.Limit"/> when this call's output was capped.</summary>
+    public OutputInfo Output { get; } = new();
+}
+
+public sealed class OutputInfo
+{
+    public bool Truncated;
+    public int OriginalChars;
+    public string? SpillPath;
 }

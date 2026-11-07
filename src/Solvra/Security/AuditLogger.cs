@@ -9,6 +9,7 @@ public record AuditEvent(
     [property: JsonPropertyName("timestamp")] DateTimeOffset Timestamp,
     [property: JsonPropertyName("event_type")] string EventType,
     [property: JsonPropertyName("session_id")] string? SessionId,
+    [property: JsonPropertyName("trace_id")] [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TraceId,
     [property: JsonPropertyName("data")] JsonElement? Data);
 
 public class AuditLogger : IAsyncDisposable
@@ -17,25 +18,42 @@ public class AuditLogger : IAsyncDisposable
     private static readonly System.Text.Json.JsonSerializerOptions ReadableJson =
         new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    private readonly string _logPath;
+    /// <summary>Trace id of the run in progress on this async flow; stamped on every event.</summary>
+    public static readonly AsyncLocal<string?> CurrentTraceId = new();
+
+    private readonly string _logDirectory;
+    private string _logPath;
+
+    /// <summary>Overridable for tests of the daily rollover.</summary>
+    internal Func<DateTime> Clock = () => DateTime.UtcNow;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private StreamWriter? _writer;
 
     public AuditLogger(string logDirectory)
     {
         Directory.CreateDirectory(logDirectory);
-        _logPath = Path.Combine(logDirectory, $"audit-{DateTime.UtcNow:yyyy-MM-dd}.jsonl");
+        _logDirectory = logDirectory;
+        _logPath = PathFor(DateTime.UtcNow);
     }
 
+    /// <summary>File for the day the event happened, not the day the process started.</summary>
     public string LogPath => _logPath;
 
-    private Task EnsureWriterAsync()
+    private string PathFor(DateTime utc) => Path.Combine(_logDirectory, $"audit-{utc:yyyy-MM-dd}.jsonl");
+
+    private async Task EnsureWriterAsync()
     {
+        var path = PathFor(Clock());
+        if (_writer != null && path != _logPath)
+        {
+            await _writer.DisposeAsync();
+            _writer = null;
+        }
+        _logPath = path;
         _writer ??= new StreamWriter(
                 new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.Read),
                 leaveOpen: false)
             { AutoFlush = true };
-        return Task.CompletedTask;
     }
 
     public async Task LogAsync(string eventType, object? data = null, string? sessionId = null)
@@ -48,6 +66,7 @@ public class AuditLogger : IAsyncDisposable
             Timestamp: DateTimeOffset.UtcNow,
             EventType: eventType,
             SessionId: sessionId,
+            TraceId: CurrentTraceId.Value,
             Data: jsonData);
 
         var line = JsonSerializer.Serialize(entry, ReadableJson);

@@ -118,7 +118,7 @@ public class FileReadTool : ToolBase
             if (size > 1_000_000 && offset == 1)
                 sb.Insert(0, $"[Large file: {total} lines, {size / 1024} KB. To find something, use grep (pattern, path) instead of reading it all.]\n");
         }
-        return new ToolExecuteResult(sb.ToString().TrimEnd('\n'), false);
+        return new ToolExecuteResult(sb.ToString().TrimEnd('\n'), false) { Records = [new { kind = "file", path, bytes = size, sha256 = ToolOutput.FileSha256(path), git_blob = ToolOutput.GitBlobId(path), line_range = $"{offset}-{lastShown}" }] };
     }
 
     private static int CountLines(string path)

@@ -80,7 +80,7 @@ public class AgentTool : ToolBase
         {
             var result = await RunAgentDelegate(
                 new SubagentRequest(prompt, model, effort, systemPrompt, maxTurns, context.SubagentDepth + 1, context), ct);
-            return new ToolExecuteResult(ToolOutput.Limit(result, "agent"), false);
+            return new ToolExecuteResult(ToolOutput.Limit(result, "agent", context), false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

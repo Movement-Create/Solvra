@@ -77,12 +77,17 @@ public class WebFetchTool : ToolBase
                 if (mediaType.Contains("html"))
                     content = StripHtml(content);
 
-                var limited = ToolOutput.Limit(content, "web_fetch");
+                var limited = ToolOutput.Limit(content, "web_fetch", context);
                 if (truncatedBody) limited += $"\n[Body larger than {MaxBodyBytes} bytes; only the start was read.]";
 
                 var status = (int)response.StatusCode;
                 var output = $"URL: {uri}\nStatus: {status}\nContent-Type: {mediaType}\n\n{limited}";
-                return new ToolExecuteResult(output, status >= 400);
+                return new ToolExecuteResult(output, status >= 400)
+                {
+                    Records = [new { kind = "url", url = uri.ToString(), status, content_type = mediaType,
+                                     etag = response.Headers.ETag?.Tag, last_modified = response.Content.Headers.LastModified?.ToString("o"),
+                                     body_sha256 = ToolOutput.Sha256(content), body_truncated = truncatedBody }]
+                };
             }
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)

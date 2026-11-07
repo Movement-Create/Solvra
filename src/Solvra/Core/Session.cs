@@ -16,6 +16,9 @@ public record SessionEvent
     public required JsonElement Data { get; init; }
 }
 
+/// <summary>Integrity and provenance fields stored next to a tool result (never sent to the model).</summary>
+public record ToolResultMeta(int OutputBytes, string OutputSha256, bool Truncated, string? SpillPath, int? ExitCode, IReadOnlyList<object>? Records);
+
 public record SessionInfo
 {
     public required SessionConfig Config { get; init; }
@@ -158,13 +161,19 @@ public sealed class SessionManager
     /// <summary>
     /// Fix 5f: Write a tool_result event to the session JSONL.
     /// </summary>
-    public async Task AppendToolResultAsync(SessionConfig session, string callId, string output, bool isError)
+    public async Task AppendToolResultAsync(SessionConfig session, string callId, string output, bool isError, ToolResultMeta? meta = null)
     {
         var data = JsonSerializer.SerializeToElement(new
         {
             call_id = callId,
             output,
-            is_error = isError
+            is_error = isError,
+            output_bytes = meta?.OutputBytes,
+            output_sha256 = meta?.OutputSha256,
+            truncated = meta?.Truncated,
+            spill_path = meta?.SpillPath,
+            exit_code = meta?.ExitCode,
+            records = meta?.Records
         }, JsonOptions);
 
         await AppendEventAsync(session, new SessionEvent
@@ -172,6 +181,28 @@ public sealed class SessionManager
             Type = "tool_result",
             Timestamp = DateTime.UtcNow.ToString("o"),
             Data = data
+        });
+    }
+
+    /// <summary>Start-of-run identity: trace id, agent version/revision, instruction files and hashes.</summary>
+    public async Task LogRunStartAsync(SessionConfig session, object data)
+    {
+        await AppendEventAsync(session, new SessionEvent
+        {
+            Type = "run_start",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            Data = JsonSerializer.SerializeToElement(data, JsonOptions)
+        });
+    }
+
+    /// <summary>The full system prompt, written once per session and again only when its hash changes.</summary>
+    public async Task LogSystemPromptAsync(SessionConfig session, string sha256, string text)
+    {
+        await AppendEventAsync(session, new SessionEvent
+        {
+            Type = "system_prompt",
+            Timestamp = DateTime.UtcNow.ToString("o"),
+            Data = JsonSerializer.SerializeToElement(new { sha256, text }, JsonOptions)
         });
     }
 

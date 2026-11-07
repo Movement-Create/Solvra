@@ -18,13 +18,22 @@ public static class ToolOutput
     public static int MaxChars =>
         int.TryParse(Environment.GetEnvironmentVariable("SOLVRA_TOOL_OUTPUT_MAX_CHARS"), out var v) && v >= 2_000 ? v : DefaultMaxChars;
 
-    public static string Limit(string text, string label, int? maxChars = null)
+    public static string Limit(string text, string label, int? maxChars = null) => Limit(text, label, null, maxChars);
+
+    /// <summary>Cap the output; when a context is given, record the truncation on it and spill into its SpillDir.</summary>
+    public static string Limit(string text, string label, ToolExecutionContext? context, int? maxChars = null)
     {
         var max = maxChars ?? MaxChars;
         text = ClipLongLines(text);
         if (text.Length <= max) return text;
 
-        var spill = Spill(text, label);
+        var spill = Spill(text, label, context?.SpillDir);
+        if (context != null)
+        {
+            context.Output.Truncated = true;
+            context.Output.OriginalChars = text.Length;
+            context.Output.SpillPath = spill;
+        }
         var head = text[..(max * 2 / 3)];
         var tail = text[^(max / 3)..];
         var omitted = text.Length - head.Length - tail.Length;
@@ -48,11 +57,36 @@ public static class ToolOutput
         return changed ? string.Join('\n', lines) : text;
     }
 
-    private static string? Spill(string text, string label)
+    public static string Sha256(string text) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+
+    public static string? FileSha256(string path)
     {
         try
         {
-            var dir = Path.Combine(Path.GetTempPath(), "solvra-tool-output");
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Git's blob id for a file's bytes: sha1("blob {length}\0" + bytes).</summary>
+    public static string? GitBlobId(string path)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            var header = System.Text.Encoding.ASCII.GetBytes($"blob {bytes.Length}\0");
+            return Convert.ToHexString(System.Security.Cryptography.SHA1.HashData([.. header, .. bytes])).ToLowerInvariant();
+        }
+        catch { return null; }
+    }
+
+    private static string? Spill(string text, string label, string? spillDir = null)
+    {
+        try
+        {
+            var dir = spillDir ?? Path.Combine(Path.GetTempPath(), "solvra-tool-output");
             Directory.CreateDirectory(dir);
             var safe = new string(label.Where(char.IsLetterOrDigit).Take(20).ToArray());
             var path = Path.Combine(dir, $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{safe}-{Guid.NewGuid():N}"[..48] + ".txt");

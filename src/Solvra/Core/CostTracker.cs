@@ -28,6 +28,10 @@ public record CostEntry
 
     [JsonPropertyName("turns")]
     public required int Turns { get; init; }
+
+    /// <summary>False when the provider has no price table (subscription models report 0, not free).</summary>
+    [JsonPropertyName("cost_known")]
+    public bool CostKnown { get; init; } = true;
 }
 
 public record CostSummary
