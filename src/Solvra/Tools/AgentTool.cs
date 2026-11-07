@@ -14,7 +14,8 @@ public sealed record SubagentRequest(
     string? SystemPrompt,
     int MaxTurns,
     int Depth,
-    ToolExecutionContext Parent);
+    ToolExecutionContext Parent,
+    string? Title = null);
 
 /// <summary>
 /// Spawn a subagent. Uses lazy loading to avoid circular dependency with the agent loop.
@@ -27,6 +28,11 @@ public class AgentTool : ToolBase
 
     /// <summary>Runs a subagent and returns its final text. Set by Program.</summary>
     public static Func<SubagentRequest, CancellationToken, Task<string>>? RunAgentDelegate { get; set; }
+
+    private readonly Func<SubagentRequest, CancellationToken, Task<string>>? _runner;
+
+    /// <summary>Uses <paramref name="runner"/> when given, else the process-wide <see cref="RunAgentDelegate"/>.</summary>
+    public AgentTool(Func<SubagentRequest, CancellationToken, Task<string>>? runner = null) => _runner = runner;
 
     public override string Name => "agent";
 
@@ -42,6 +48,7 @@ public class AgentTool : ToolBase
         properties = new
         {
             prompt = new { type = "string", description = "Complete task description for the subagent" },
+            description = new { type = "string", description = "Short title for the user, 3-6 words (optional)" },
             model = new { type = "string", description = "Model to use (optional, defaults to the configured subagent model or current model)" },
             effort = new { type = "string", @enum = new[] { "low", "medium", "high", "xhigh" }, description = "Reasoning effort (optional, defaults to the configured subagent effort or current effort)" },
             system_prompt = new { type = "string", description = "Custom system prompt (optional)" },
@@ -73,13 +80,15 @@ public class AgentTool : ToolBase
         if (maxTurns < 0)
             return new ToolExecuteResult("Error: max_turns must be 0 (unlimited) or a positive integer.", true);
 
-        if (RunAgentDelegate == null)
+        var run = _runner ?? RunAgentDelegate;
+        if (run == null)
             return new ToolExecuteResult("Error: agent loop not configured. Set AgentTool.RunAgentDelegate.", true);
 
         try
         {
-            var result = await RunAgentDelegate(
-                new SubagentRequest(prompt, model, effort, systemPrompt, maxTurns, context.SubagentDepth + 1, context), ct);
+            var result = await run(
+                new SubagentRequest(prompt, model, effort, systemPrompt, maxTurns, context.SubagentDepth + 1, context,
+                    SubagentTitle(GetOptionalString(input, "description"), prompt)), ct);
             return new ToolExecuteResult(ToolOutput.Limit(result, "agent", context), false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -90,5 +99,12 @@ public class AgentTool : ToolBase
         {
             return new ToolExecuteResult($"Subagent error: {ex.Message}", true);
         }
+    }
+
+    /// <summary>The model's short description, else the first line of the prompt, capped at 60 characters.</summary>
+    public static string SubagentTitle(string? description, string prompt)
+    {
+        var text = !string.IsNullOrWhiteSpace(description) ? description.Trim() : prompt.Trim().Split('\n')[0].Trim();
+        return text.Length > 60 ? text[..57].TrimEnd() + "…" : text;
     }
 }

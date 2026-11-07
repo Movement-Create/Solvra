@@ -94,6 +94,21 @@ public static class Program
         var ephemeralOption = new Option<bool>("--ephemeral", "Do not persist a transcript");
         var noToolsOption = new Option<bool>("--no-tools", "Generation-only mode without tools, hooks, skills, memory or project instructions");
         var askAllOption = new Option<bool>("--ask-all", "Ask before every action except local workspace reads");
+        var outputFormatOption = new Option<string?>("--output-format", "Output: text (default), json (same as --json) or stream-json (JSON events on stdout, control messages on stdin)");
+        outputFormatOption.AddValidator(r =>
+        {
+            var value = r.GetValueOrDefault<string?>();
+            if (value is not null && value is not ("text" or "json" or "stream-json"))
+                r.ErrorMessage = $"Invalid output format '{value}'. Expected text, json or stream-json.";
+        });
+        var allowRuleOption = new Option<string[]>("--allow-rule", "With stream-json: an approval remembered for this session (edit, agent, network, read or execute:<command>); repeatable") { AllowMultipleArgumentsPerToken = false };
+        allowRuleOption.AddValidator(r =>
+        {
+            foreach (var rule in r.GetValueOrDefault<string[]>() ?? [])
+                if (StreamJsonRun.PermissionRule.Parse(rule) is null)
+                    r.ErrorMessage = $"Invalid allow rule '{rule}'. Expected edit, agent, network, read or execute:<command>.";
+        });
+        var titleOption = new Option<string?>("--title", "Title for a new session (default: the first line of the prompt)");
         var permissionModeOption = new Option<string?>("--permission-mode", "Permission mode: default (ask before edits), ask-all, plan or auto. Overrides --auto, --ask-all and the config; --plan still wins");
         permissionModeOption.AddValidator(r =>
         {
@@ -108,20 +123,28 @@ public static class Program
         var runPromptArg = new Argument<string>("prompt", "The prompt to execute (use - to read it from stdin)");
         var runCommand = new Command("run", "Run agent with a prompt") { runPromptArg };
         foreach (var o in new Option[] { providerOption, modelOption, maxTurnsOption, jsonOption, autoOption, planOption, effortOption,
-                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption, permissionModeOption })
+                     subagentsOption, subagentModelOption, subagentEffortOption, systemOption, sessionOption, summaryOption, maxBudgetOption, cwdOption, reflectOption, noSessionOption, ephemeralOption, noToolsOption, askAllOption, timeLimitOption, modelTimeoutOption, permissionModeOption, outputFormatOption, allowRuleOption, titleOption })
             runCommand.AddOption(o);
 
         runCommand.SetHandler(async (context) =>
         {
             var p = context.ParseResult;
             var prompt = p.GetValueForArgument(runPromptArg);
-            var outputJson = p.GetValueForOption(jsonOption);
+            var outputFormat = p.GetValueForOption(outputFormatOption) ?? (p.GetValueForOption(jsonOption) ? "json" : "text");
+            var outputJson = outputFormat == "json";
+            var streamJson = outputFormat == "stream-json";
             var auto = p.GetValueForOption(autoOption);
             var plan = p.GetValueForOption(planOption);
             var askAll = p.GetValueForOption(askAllOption);
             var ephemeral = p.GetValueForOption(ephemeralOption) || p.GetValueForOption(noSessionOption);
             var ct = context.GetCancellationToken();
 
+            if (streamJson && prompt == "-")
+            {
+                Console.Error.WriteLine("solvra: with --output-format stream-json, stdin carries control messages; pass the prompt as an argument.");
+                context.ExitCode = 1;
+                return;
+            }
             if (prompt == "-") prompt = await Console.In.ReadToEndAsync(ct);
             if (!ApplyCwd(p.GetValueForOption(cwdOption))) { context.ExitCode = 1; return; }
 
@@ -141,7 +164,7 @@ public static class Program
             {
                 Id = Guid.NewGuid().ToString(),
                 CreatedAt = DateTime.UtcNow.ToString("o"),
-                Title = prompt.Length > 80 ? prompt[..80] : prompt,
+                Title = SessionTitles.FromText(p.GetValueForOption(titleOption)) ?? SessionTitles.FromText(prompt),
                 Model = model,
                 Provider = provider,
                 PermissionMode = permissionMode,
@@ -183,6 +206,15 @@ public static class Program
                 sessionConfig = await sessionMgr.CreateAsync(sessionConfig);
             }
             if (ephemeral) sessionConfig = sessionConfig with { FilePath = "" };
+
+            if (streamJson)
+            {
+                var rules = (p.GetValueForOption(allowRuleOption) ?? []).Select(StreamJsonRun.PermissionRule.Parse).OfType<StreamJsonRun.PermissionRule>();
+                context.ExitCode = await RunStreamJsonAsync(s, sessionMgr, sessionConfig, history, prompt, permissionMode, ephemeral, rules,
+                    p.GetValueForOption(timeLimitOption) is > 0 and var limit ? TimeSpan.FromSeconds(limit) : null,
+                    p.GetValueForOption(noToolsOption), ct);
+                return;
+            }
 
             var canPrompt = !Console.IsInputRedirected && prompt != "-";
             var approver = auto || !canPrompt ? null : (Func<ToolCall, Task<bool>>)AgentHost.AskOnConsole;
@@ -561,13 +593,20 @@ public static class Program
 
         // --- solvra session list / show ---
         var sessionCommand = new Command("session", "Session management");
-        var sessionListCommand = new Command("list", "List sessions");
-        sessionListCommand.SetHandler(async () =>
+        var sessionListCommand = new Command("list", "List sessions (newest activity first)");
+        var sessionListJsonOption = new Option<bool>("--json", "Output as a JSON array (id, title, created_at, updated_at, model, provider)");
+        sessionListCommand.AddOption(sessionListJsonOption);
+        sessionListCommand.SetHandler(async (bool asJson) =>
         {
             var config = await ConfigLoader.LoadAsync();
             var mgr = new SessionManager(config.SessionsDir);
-            var sessions = await mgr.ListAsync();
+            var sessions = await mgr.ListSummariesAsync();
 
+            if (asJson)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(sessions, StreamJsonRun.Json));
+                return;
+            }
             if (sessions.Count == 0)
             {
                 Console.WriteLine("No sessions found.");
@@ -576,9 +615,9 @@ public static class Program
 
             foreach (var s in sessions)
             {
-                Console.WriteLine($"  {s.Id}  {s.CreatedAt}  {s.Model}  {s.Title ?? "(untitled)"}");
+                Console.WriteLine($"  {s.Id}  {s.CreatedAt}  {s.Model}  {s.Title}");
             }
-        });
+        }, sessionListJsonOption);
 
         var sessionShowArg = new Argument<string>("id", "Session ID to show");
         var sessionShowCommand = new Command("show", "Show session details") { sessionShowArg };
@@ -668,6 +707,34 @@ public static class Program
         sessionCommand.AddCommand(sessionResumeCmd);
         sessionCommand.AddCommand(sessionDeleteCmd);
 
+        // --- solvra session rename <id> <title> ---
+        var sessionRenameIdArg = new Argument<string>("id", "Session ID to rename");
+        var sessionRenameTitleArg = new Argument<string>("title", "New title");
+        var sessionRenameCmd = new Command("rename", "Rename a session (appends a title event; history is untouched)") { sessionRenameIdArg, sessionRenameTitleArg };
+        sessionRenameCmd.SetHandler(async (context) =>
+        {
+            var id = context.ParseResult.GetValueForArgument(sessionRenameIdArg);
+            var title = context.ParseResult.GetValueForArgument(sessionRenameTitleArg);
+            if (!SessionManager.IsValidSessionId(id))
+            {
+                Console.Error.WriteLine($"solvra: invalid session id '{id}'");
+                context.ExitCode = 1;
+                return;
+            }
+            var config = await ConfigLoader.LoadAsync();
+            try
+            {
+                await new SessionManager(config.SessionsDir).RenameAsync(id, title);
+                Console.WriteLine($"Session {id} renamed.");
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or ArgumentException)
+            {
+                Console.Error.WriteLine($"solvra: {ex.Message}");
+                context.ExitCode = 1;
+            }
+        });
+        sessionCommand.AddCommand(sessionRenameCmd);
+
         // --- solvra tools ---
         var toolsCmd = new Command("tools", "List all available tools");
         toolsCmd.SetHandler(() =>
@@ -705,6 +772,115 @@ public static class Program
         rootCommand.AddCommand(skillsCmd);
 
         return rootCommand;
+    }
+
+    /// <summary>
+    /// <c>run --output-format stream-json</c>: events on stdout, control messages on stdin (see
+    /// <see cref="StreamJsonRun"/>). Approvals come from the control channel unless the mode is auto.
+    /// </summary>
+    private static async Task<int> RunStreamJsonAsync(AgentSubsystems s, SessionManager sessionMgr, SessionConfig sessionConfig,
+        List<Message> history, string prompt, string permissionMode, bool ephemeral, IEnumerable<StreamJsonRun.PermissionRule> rules,
+        TimeSpan? timeLimit, bool noTools, CancellationToken ct)
+    {
+        var config = s.Config;
+        var cwd = Directory.GetCurrentDirectory();
+        var stream = new StreamJsonRun(Console.Out, s.Registry, cwd, sessionConfig.Model, sessionConfig.Provider, rules)
+        {
+            CurrentSessionId = sessionConfig.Id,
+        };
+        var auto = permissionMode is "auto" or "bypasspermissions";
+        stream.Emit(new
+        {
+            type = "session",
+            id = string.IsNullOrEmpty(sessionConfig.FilePath) ? null : sessionConfig.Id,
+            title = SessionTitles.Display(sessionConfig.Title, prompt),
+            model = sessionConfig.Model,
+            provider = sessionConfig.Provider,
+            cwd,
+            mode = permissionMode switch { "plan" => "plan", "auto" or "bypasspermissions" => "auto", "askall" => "ask-all", _ => "ask" },
+            effort = sessionConfig.Effort.ToWireString(),
+            resumed = history.Count > 0,
+            rules = stream.Rules.Select(r => r.ToString()).ToArray(),
+        });
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var readerCts = new CancellationTokenSource();
+        var control = Task.Run(() => stream.ReadControlAsync(Console.In, runCts, readerCts.Token));
+
+        var hooks = stream.HooksFor("main");
+        var streamed = new System.Text.StringBuilder();
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        AgentRunResult? result = null;
+        var cancelled = false;
+        try
+        {
+            result = await s.CreateReflection().RunAgentWithReflectionAsync(new AgentRunOptions
+            {
+                Prompt = prompt,
+                Session = sessionConfig,
+                History = history,
+                Streaming = true,
+                OnText = text => { lock (streamed) streamed.Append(text); hooks.OnText!(text); },
+                OnThinking = hooks.OnThinking,
+                OnToolCall = hooks.OnToolCall,
+                OnToolResult = hooks.OnToolResult,
+                OnUsage = hooks.OnUsage,
+                OnPermissionRequest = auto ? null : hooks.OnPermissionRequest,
+                Observer = stream,
+                AgentId = "main",
+                SubagentsEnabled = config.SubagentsEnabled,
+                SubagentModel = config.SubagentModel,
+                SubagentEffort = config.ParsedSubagentEffort,
+                TimeLimit = timeLimit,
+                LogToSession = !ephemeral,
+                NoTools = noTools,
+            }, runCts.Token);
+            if (runCts.IsCancellationRequested && !ct.IsCancellationRequested) cancelled = true;
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+        }
+        catch (Exception ex)
+        {
+            stream.EmitError(ex.Message, StreamJsonRun.FixFor(ex.Message), sessionConfig.Provider);
+        }
+        finally
+        {
+            stream.DenyAllPending();
+            readerCts.Cancel();
+        }
+
+        if (cancelled && result is null && !ephemeral)
+        {
+            // Keep user/assistant alternation so the session still resumes cleanly.
+            string partial;
+            lock (streamed) partial = streamed.ToString();
+            try { await sessionMgr.LogAssistantMessageAsync(sessionConfig, string.IsNullOrWhiteSpace(partial) ? "(interrupted)" : partial + "\n\n(interrupted)"); }
+            catch { /* logging must not hide the cancel */ }
+        }
+        if (result is not null && !ephemeral) await sessionMgr.LogResultAsync(sessionConfig, result);
+        if (result is { StopReason: StopReason.Error })
+            stream.EmitError(result.Error ?? result.Text, StreamJsonRun.FixFor(result.Error ?? result.Text), sessionConfig.Provider);
+
+        var (input, output, cost) = stream.Totals();
+        string finalText;
+        lock (streamed) finalText = result?.Text ?? streamed.ToString();
+        stream.Emit(new
+        {
+            type = "done",
+            stop_reason = cancelled ? "cancelled" : result?.StopReason.ToString().ToLowerInvariant() ?? "error",
+            text = finalText,
+            error = result?.Error,
+            session_id = string.IsNullOrEmpty(sessionConfig.FilePath) ? null : sessionConfig.Id,
+            turns = result?.Turns ?? 0,
+            duration_ms = started.ElapsedMilliseconds,
+            cost_usd = Math.Max(cost, result?.CostUsd ?? 0),
+            usage = new { input = Math.Max(input, result?.Usage.InputTokens ?? 0), output = Math.Max(output, result?.Usage.OutputTokens ?? 0) },
+        });
+        // Do not wait for stdin: the caller may keep it open. The reader stops on its own token.
+        _ = control;
+        return cancelled ? 130 : result is null ? 1 : AgentHost.ExitCode(result.StopReason);
     }
 
     private static SolvraConfig ApplySubagentOptions(SolvraConfig config, string? mode, string? model, string? effort)

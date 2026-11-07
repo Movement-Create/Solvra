@@ -33,6 +33,10 @@ public record ToolExecutionContext(
     /// <summary>The parent run's permission prompt, so subagents ask the same user.</summary>
     public Func<Models.ToolCall, Task<bool>>? PermissionRequest { get; init; }
 
+    /// <summary>Live observer of the run (stream-json) and the id of the agent running this tool.</summary>
+    public Core.IAgentObserver? Observer { get; init; }
+    public string AgentId { get; init; } = "main";
+
     /// <summary>The parent run's model, provider and effort, inherited by subagents.</summary>
     public string? Model { get; init; }
     public string? Provider { get; init; }
