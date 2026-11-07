@@ -62,11 +62,24 @@ public sealed class SessionManager
         return finalConfig;
     }
 
+    // Tool calls in a parallel batch log their results at the same time. Two concurrent appends open
+    // the file at the same end offset and the second overwrites the first, which loses a tool_result
+    // and makes the session unresumable ("No tool output found for function call"). One writer at a time.
+    private static readonly SemaphoreSlim WriteLock = new(1, 1);
+
     public async Task AppendEventAsync(SessionConfig session, SessionEvent evt)
     {
         if (string.IsNullOrEmpty(session.FilePath)) return;
         var line = JsonSerializer.Serialize(evt, JsonOptions) + "\n";
-        await File.AppendAllTextAsync(session.FilePath, line);
+        await WriteLock.WaitAsync();
+        try
+        {
+            await File.AppendAllTextAsync(session.FilePath, line);
+        }
+        finally
+        {
+            WriteLock.Release();
+        }
     }
 
     public async Task LogUserMessageAsync(SessionConfig session, string content)
