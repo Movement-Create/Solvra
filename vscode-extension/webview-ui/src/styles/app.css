@@ -273,3 +273,14 @@ body.vscode-high-contrast-light .md [data-streamdown='code-block-body'] span[sty
 .status-line { white-space: nowrap; min-width: 0; }
 .status-line > * { flex-shrink: 0; }
 .status-line .shimmer { flex-shrink: 1; min-width: 0; }
+
+/* Edit review (checkpoints) */
+.edit-actions { display: flex; gap: var(--space-3); margin: 0 0 2px 13px; }
+.edit-actions .link-btn { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
+.edit-actions .link-btn:hover { color: var(--fg); text-decoration: none; }
+.edit-actions .codicon { font-size: 12px !important; }
+.restore-link { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: var(--text-xs); color: var(--faint); }
+.restore-link:hover { color: var(--fg); }
+.restore-link .codicon { font-size: 12px !important; }
+.confirm-inline { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: 6px var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); }
+.confirm-inline.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }

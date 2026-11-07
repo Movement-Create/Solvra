@@ -1,6 +1,6 @@
 // Chat state and the reducer that applies backend stream events. Pure: unit-tested in store.test.ts.
 import type {
-  ChatMode, Chip, FixKind, HostMessage, PermissionRequestEvent, PlanItem, ProviderGroup, SessionRow,
+  ChatMode, Chip, EditInfo, FixKind, HostMessage, PermissionRequestEvent, PlanItem, ProviderGroup, SessionRow,
   SettingsState, StreamEvent, ToolInfo, ToolKind, ToolResultMeta, TranscriptMessage,
 } from '../../src/protocol';
 
@@ -46,11 +46,14 @@ export interface State {
   view: View;
   chips: Chip[];
   selection: Chip | null;
+  /** Review state of checkpointed edits, by tool call id. */
+  edits: Record<string, EditInfo>;
+  undoConflict: { toolIds: string[]; files: string[] } | null;
   selectionDismissed: string | null;
   draft: { text: string; send: boolean; nonce: number } | null;
   tools: ToolInfo[] | null;
   memory: { query: string; results: string[]; added?: boolean } | null;
-  files: { query: string; items: { path: string; label: string; kind: 'file' | 'folder' }[] };
+  files: { query: string; items: { path: string; label: string; kind: 'file' | 'folder'; abs?: string }[] };
   hostError: { message: string; fix?: FixKind | null; provider?: string | null } | null;
   openRequest: { view: 'sessions' | 'model'; nonce: number } | null;
   inTab: boolean;
@@ -61,7 +64,7 @@ export interface State {
 export const initialState: State = {
   turns: [], sessionId: null, title: 'New chat', runId: null, approvals: [], plan: [],
   usage: { input: 0, output: 0, costUsd: 0, contextPct: 0 }, mode: 'ask', model: '', providers: [], sessions: [],
-  settings: null, view: 'chat', chips: [], selection: null, selectionDismissed: null, draft: null, tools: null, memory: null, files: { query: '', items: [] },
+  settings: null, view: 'chat', chips: [], selection: null, selectionDismissed: null, edits: {}, undoConflict: null, draft: null, tools: null, memory: null, files: { query: '', items: [] },
   hostError: null, openRequest: null, inTab: false, workspaceName: null, ready: false,
 };
 
@@ -75,7 +78,8 @@ export type Action =
   | { type: 'local/clearChips' }
   | { type: 'local/answered'; id: string; decision: 'allow' | 'allow_always' | 'deny' }
   | { type: 'local/dismissHostError' }
-  | { type: 'local/dismissSelection' };
+  | { type: 'local/dismissSelection' }
+  | { type: 'local/dismissConflict' };
 
 export const MODES: ChatMode[] = ['ask', 'plan', 'auto'];
 export const nextMode = (m: ChatMode): ChatMode => MODES[(MODES.indexOf(m) + 1) % MODES.length];
@@ -207,6 +211,8 @@ export function summarize(name: string, input: Record<string, unknown>): string 
     case 'web_search': return `Search the web for ${s('query')}`;
     case 'agent': return `Agent: ${s('description') || s('prompt').split('\n')[0]}`;
     case 'todo': return 'Update plan';
+    case 'verify': return `Verify ${s('check')}`;
+    case 'decide': return `Decide ${s('question')}`;
     default: return name;
   }
 }
@@ -265,6 +271,9 @@ export function reducer(state: State, a: Action): State {
     }
     case 'local/dismissHostError': return { ...state, hostError: null };
     case 'selection': return { ...state, selection: a.chip };
+    case 'edits': return { ...state, edits: { ...state.edits, ...a.edits }, undoConflict: null };
+    case 'undoConflict': return { ...state, undoConflict: { toolIds: a.toolIds, files: a.files } };
+    case 'local/dismissConflict': return { ...state, undoConflict: null };
     case 'local/dismissSelection': return { ...state, selectionDismissed: state.selection ? selectionKey(state.selection) : null };
     default: return state;
   }
@@ -286,6 +295,15 @@ export function autoChip(s: State): Chip | null {
   if (!c || s.selectionDismissed === selectionKey(c)) return null;
   if (s.chips.some((x) => x.path === c.path && x.startLine === c.startLine && x.endLine === c.endLine)) return null;
   return c;
+}
+
+/** Checkpointed edits that can still be undone, from this turn to the newest, oldest first. */
+export function editsFrom(s: State, turnIndex: number): string[] {
+  const ids: string[] = [];
+  for (const t of s.turns.slice(turnIndex))
+    for (const i of t.items)
+      if (i.kind === 'tool' && s.edits[i.id] && s.edits[i.id].state !== 'undone') ids.push(i.id);
+  return ids;
 }
 
 // ── Derived values ────────────────────────────────────────────────────────────────────

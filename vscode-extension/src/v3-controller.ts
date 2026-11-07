@@ -8,9 +8,11 @@ import { KEYED_PROVIDERS, KeyStore, keyInfo } from './keys';
 import { buildProviderGroups, codexSignedIn, parseModelsJson, PROVIDER_CATALOG, qualifyModel, splitModel } from './models';
 import { StreamRun } from './stream-run';
 import { normalizeMode } from './run-args';
-import { buildPrompt, titleFrom } from './prompt';
+import { buildPrompt, extraDirs, titleFrom } from './prompt';
+import { CheckpointStore } from './checkpoints';
+import { EditReview } from './edit-review';
 import type {
-  ChatMode, Chip, FileItem, HostMessage, InitState, ProviderGroup, SessionRow, SettingsState, SettingsValues,
+  ChatMode, Chip, EditInfo, FileItem, HostMessage, InitState, ProviderGroup, SessionRow, SettingsState, SettingsValues,
   StreamEvent, ToolInfo, TranscriptMessage, WebviewMessage,
 } from './protocol';
 
@@ -19,6 +21,8 @@ export interface V3Services {
   runner: AgentRunner;
   keys: KeyStore;
   output: vscode.OutputChannel;
+  checkpoints: CheckpointStore;
+  review: EditReview;
 }
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const;
@@ -41,6 +45,7 @@ export class V3Controller implements vscode.Disposable {
   private model: string;
   private readonly disposables: vscode.Disposable[] = [];
   private ready = false;
+  private pendingDirs: string[] = [];
   private readonly queue: HostMessage[] = [];
 
   constructor(
@@ -56,6 +61,8 @@ export class V3Controller implements vscode.Disposable {
     this.model = defaultModel();
     hub.controllers.add(this);
     this.disposables.push(webview.onDidReceiveMessage((m: WebviewMessage) => this.handle(m).catch((e) => this.fail(e))));
+    // Keep/Undo from the editor title bar updates every chat.
+    this.disposables.push(s.review.onDidChange((ids) => this.post({ type: 'edits', edits: this.editInfo(ids) })));
     this.disposables.push(vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('solvra')) void this.settingsState().then((settings) => this.post({ type: 'settings', settings }));
     }));
@@ -160,6 +167,27 @@ export class V3Controller implements vscode.Disposable {
         if (picked?.[0]) await this.saveSettings({ solvraPath: picked[0].fsPath });
         return;
       }
+      case 'openDiff': await this.s.review.open(m.toolId); return;
+      case 'keepEdit': this.s.review.keep(m.toolId); this.post({ type: 'edits', edits: this.editInfo([m.toolId]) }); return;
+      case 'undoEdits': {
+        const result = this.s.checkpoints.undo(m.toolIds, !!m.force);
+        if (result.conflicts.length) {
+          this.post({ type: 'undoConflict', toolIds: m.toolIds, files: [...new Set(result.conflicts.map((c) => vscode.workspace.asRelativePath(c.file, false)))] });
+          return;
+        }
+        const edits = this.editInfo(result.undone);
+        for (const f of result.failed) edits[f.toolId] = { ...(edits[f.toolId] ?? { file: '', state: 'pending' }), note: f.message };
+        hub.broadcast(() => ({ type: 'edits', edits }));
+        return;
+      }
+      case 'addFolder': {
+        const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: true, openLabel: 'Add to chat' });
+        for (const uri of picked ?? []) {
+          const rel = vscode.workspace.asRelativePath(uri, false);
+          this.post({ type: 'addChip', chip: { kind: 'folder', path: rel, abs: uri.fsPath, label: path.basename(uri.fsPath) + '/' } });
+        }
+        return;
+      }
       case 'runFix': {
         if (m.fix === 'codex_login') {
           const t = vscode.window.createTerminal({ name: 'Codex sign-in' });
@@ -175,7 +203,7 @@ export class V3Controller implements vscode.Disposable {
 
   private async send(text: string, chips: Chip[], mode: ChatMode, model: string): Promise<void> {
     if (this.run?.running) return;
-    const prompt = buildPrompt(text, chips);
+    const prompt = buildPrompt(text, chips, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
     if (!prompt.trim()) return;
     this.mode = mode;
     this.model = qualifyModel(model);
@@ -201,8 +229,14 @@ export class V3Controller implements vscode.Disposable {
     }
 
     const cfg = vscode.workspace.getConfiguration('solvra');
-    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? require('os').homedir();
+    // Every workspace folder is context: the first is the working folder, the others (and any
+    // folder added with @, remembered for the session) are passed with --add-dir.
+    const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    const cwd = roots[0] ?? require('os').homedir();
     const rules = this.sessionId ? this.s.context.workspaceState.get<string[]>(rulesKey(this.sessionId), []) : [];
+    const remembered = this.sessionId ? this.s.context.workspaceState.get<string[]>(dirsKey(this.sessionId), []) : [];
+    const addDirs = [...new Set([...extraDirs(chips, cwd, roots), ...remembered])];
+    this.pendingDirs = addDirs.filter((d) => !roots.includes(d));
     let sawDone = false;
     const run = new StreamRun({
       dotnet: invocation.dotnet,
@@ -218,6 +252,8 @@ export class V3Controller implements vscode.Disposable {
       sessionId: this.sessionId ?? undefined,
       title: this.sessionId ? undefined : titleFrom(text, chips),
       allowRules: rules,
+      addDirs,
+      checkpointDir: this.s.checkpoints.dir,
     }, (event) => this.onEvent(id, event, () => { sawDone = true; }), (line) => this.s.output.appendLine(line));
     this.run = run;
     let code: number | null = null;
@@ -246,6 +282,16 @@ export class V3Controller implements vscode.Disposable {
     if (event.type === 'session' && event.id) {
       this.sessionId = event.id;
       this.onTitle?.(event.title);
+      if (this.pendingDirs.length) {
+        const key = dirsKey(event.id);
+        const known = this.s.context.workspaceState.get<string[]>(key, []);
+        void this.s.context.workspaceState.update(key, [...new Set([...known, ...this.pendingDirs])]);
+      }
+    } else if (event.type === 'tool_result' && event.checkpoint) {
+      this.s.checkpoints.record(event.id, this.sessionId, event.checkpoint.file, event.checkpoint.before);
+      this.post({ type: 'stream', runId, event });
+      this.post({ type: 'edits', edits: this.editInfo([event.id]) });
+      return;
     } else if (event.type === 'permission_rule' && this.sessionId) {
       const key = rulesKey(this.sessionId);
       const rules = this.s.context.workspaceState.get<string[]>(key, []);
@@ -275,6 +321,7 @@ export class V3Controller implements vscode.Disposable {
       const d = JSON.parse(out) as { id: string; title: string; messages: TranscriptMessage[] };
       this.sessionId = d.id;
       this.post({ type: 'sessionLoaded', id: d.id, title: d.title, messages: d.messages });
+      this.post({ type: 'edits', edits: this.s.checkpoints.forSession(d.id) });
       this.onTitle?.(d.title);
     } catch {
       this.post({ type: 'hostError', message: 'That session could not be opened. It may have been deleted.' });
@@ -353,6 +400,12 @@ export class V3Controller implements vscode.Disposable {
     try { return this.s.runner.capture(args); } catch (e) { return Promise.reject(e); }
   }
 
+  private editInfo(ids: string[]): Record<string, EditInfo> {
+    const out: Record<string, EditInfo> = {};
+    for (const id of ids) { const r = this.s.checkpoints.get(id); if (r) out[id] = { file: r.file, state: r.state }; }
+    return out;
+  }
+
   private fail(e: unknown): void {
     const message = errorText(e);
     this.s.output.appendLine(`[Solvra] ${message}`);
@@ -363,6 +416,7 @@ export class V3Controller implements vscode.Disposable {
 // ── Helpers ─────────────────────────────────────────────────────────────────────────
 
 const rulesKey = (sessionId: string) => `solvra.allowRules.${sessionId}`;
+const dirsKey = (sessionId: string) => `solvra.addDirs.${sessionId}`;
 
 export function defaultModel(): string {
   const cfg = vscode.workspace.getConfiguration('solvra');
@@ -399,11 +453,14 @@ async function searchFiles(query: string): Promise<FileItem[]> {
   const folders = new Set<string>();
   for (const uri of uris) {
     const rel = vscode.workspace.asRelativePath(uri, false);
-    items.push({ path: rel, label: path.basename(rel), kind: 'file' });
+    items.push({ path: rel, label: path.basename(rel), kind: 'file', abs: uri.fsPath });
     const dir = path.dirname(rel);
-    if (dir !== '.' && (!q || dir.toLowerCase().includes(q.toLowerCase()))) folders.add(dir);
+    if (dir !== '.' && (!q || dir.toLowerCase().includes(q.toLowerCase()))) folders.add(`${dir}\u0000${path.dirname(uri.fsPath)}`);
   }
-  const folderItems: FileItem[] = [...folders].slice(0, 8).map((d) => ({ path: d, label: path.basename(d) + '/', kind: 'folder' }));
+  const folderItems: FileItem[] = [...folders].slice(0, 8).map((d) => {
+    const [rel, abs] = d.split('\u0000');
+    return { path: rel, label: path.basename(rel) + '/', kind: 'folder', abs };
+  });
   return [...folderItems, ...items].slice(0, 30);
 }
 

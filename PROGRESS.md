@@ -1,3 +1,30 @@
+# VS Code extension fix and redesign: Phases 0–3 — 2026-11-07
+
+Stacked PRs, each with its own worktree under `/home/cosmos/wt/github/Solvra/`:
+
+| PR | Branch (base) | Worktree | What |
+|---|---|---|---|
+| #3 | `fix/ask-mode-safety` (main) | `ask-mode-safety` | Ask never passes `--auto`; plan never pairs with it; `--permission-mode`; in-chat approval notice |
+| #4 | `feature/stream-json` (#3) | `stream-json` | `run --output-format stream-json`, stdin approvals, nested parallel sub-agents, plan/usage events, session titles |
+| #5 | `feature/webview-v3` (#4) | `webview-v3` | React v3 chat (default), everything in-panel, SecretStorage keys + migration, palette shows only Open Chat |
+| #6 | `feature/vscode-integration` (#5) | `vscode-integration` | Checkpoints, native diff Keep/Undo, restore-to-message, every folder as context |
+
+Verification on #6: 455/455 .NET, 18 host, 13 webview tests; a 24-state screenshot harness; live
+VS Code 1.143.1 runs over CDP (`webview-ui/harness/live*.mjs`, throwaway `/tmp/svdemo` and
+`/tmp/svdata`, isolated `/tmp/svprof` and sessions folder, $0.25 budget) in dark and light.
+
+Open items and blockers:
+- The approved mockup (`Plans/solvra-chat-redesign.html`) and `Plans/ui-test-harness/` are not in
+  the repo (they're on the Mac checkout), and the claude.ai artifact isn't readable from the devbox.
+  Tokens the brief didn't give are marked `reconcile` in `webview-ui/src/styles/tokens.css`.
+- VS Code adds "Solvra: Focus on Chat View" and "View: Show Solvra" to the palette for every view;
+  an extension can't hide them.
+- The uncommitted 0.2.0 RC in the `vscode-release` worktree (another agent) overlaps these files.
+  This stack is based on `origin/main` and doesn't include it.
+- Changes made by `bash` are not checkpointed (file tools only).
+
+---
+
 # Limits and completion fix — 2026-10-10
 
 Task worktree: `/home/cosmos/wt/github/Solvra/limits-validation`, branch `fix/limits-validation`, base `origin/main` at `a9f69d8`.

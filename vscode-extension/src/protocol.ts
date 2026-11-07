@@ -8,14 +8,16 @@ export type FixKind = 'add_api_key' | 'rate_limited' | 'retry' | 'set_executable
 
 // ── Backend events (`solvra run --output-format stream-json`, see docs/stream-json.md) ──
 
-export interface SessionEvent { type: 'session'; id: string | null; title: string; model: string; provider: string; cwd: string; mode: string; effort: string; resumed: boolean; rules: string[] }
+export interface SessionEvent { type: 'session'; id: string | null; title: string; model: string; provider: string; cwd: string; mode: string; effort: string; resumed: boolean; rules: string[]; additional_dirs?: string[] }
 export interface TextDeltaEvent { type: 'text_delta'; agent: string; text: string }
 export interface ThinkingDeltaEvent { type: 'thinking_delta'; agent: string; text: string }
 export interface ToolCallEvent { type: 'tool_call'; agent: string; id: string; name: string; input: Record<string, unknown>; summary: string; kind: ToolKind }
 export interface PermissionRequestEvent { type: 'permission_request'; id: string; agent: string; tool_call_id: string; tool: string; kind: ToolKind; summary: string; diff: string | null; command: string | null; always: string | null }
 export interface PermissionRuleEvent { type: 'permission_rule'; rule: string; kind: string; prefix: string | null }
 export interface ToolResultMeta { added: number | null; removed: number | null; lines: number }
-export interface ToolResultEvent { type: 'tool_result'; agent: string; id: string; ok: boolean; output: string; diff: string | null; meta: ToolResultMeta }
+/** Where an edit's original was saved (`before` null: the file was new). Only with --checkpoint-dir. */
+export interface Checkpoint { file: string; before: string | null }
+export interface ToolResultEvent { type: 'tool_result'; agent: string; id: string; ok: boolean; output: string; diff: string | null; meta: ToolResultMeta; checkpoint?: Checkpoint | null }
 export interface AgentStartEvent { type: 'agent_start'; agent: string; parent: string; tool_call_id: string | null; title: string }
 export interface AgentEndEvent { type: 'agent_end'; agent: string; status: 'ok' | 'error' | 'cancelled' }
 export interface PlanItem { text: string; status: 'done' | 'active' | 'pending' }
@@ -39,6 +41,8 @@ export interface Chip {
   endLine?: number;
   /** Selected text for selection chips. */
   text?: string;
+  /** Absolute path, when known (needed for folders outside the first workspace folder). */
+  abs?: string;
 }
 
 export interface SessionRow { id: string; title: string; created_at: string; updated_at: string; model: string; provider: string }
@@ -72,7 +76,10 @@ export interface SettingsState { values: SettingsValues; keys: KeyStatus[] }
 
 export interface ToolInfo { name: string; description: string; kind: ToolKind }
 
-export interface FileItem { path: string; label: string; kind: 'file' | 'folder' }
+export interface FileItem { path: string; label: string; kind: 'file' | 'folder'; abs?: string }
+
+export type EditState = 'pending' | 'kept' | 'undone';
+export interface EditInfo { file: string; state: EditState; note?: string }
 
 export interface InitState {
   mode: ChatMode;
@@ -108,7 +115,11 @@ export type HostMessage =
   | { type: 'hostError'; message: string; fix?: FixKind | null; provider?: string | null }
   | { type: 'notice'; text: string }
   | { type: 'open'; view: 'settings' | 'memory' | 'tools' | 'sessions' | 'model' }
-  | { type: 'focusInput' };
+  | { type: 'focusInput' }
+  /** Review state of edits that have a checkpoint (live ones and those restored with a session). */
+  | { type: 'edits'; edits: Record<string, EditInfo> }
+  /** Undo stopped because these files changed after Solvra edited them; the user may force it. */
+  | { type: 'undoConflict'; toolIds: string[]; files: string[] };
 
 // ── Webview → host ──
 
@@ -135,4 +146,9 @@ export type WebviewMessage =
   | { type: 'openFile'; path: string; line?: number }
   | { type: 'openInTab' }
   | { type: 'browseExecutable' }
-  | { type: 'runFix'; fix: FixKind; provider?: string | null };
+  | { type: 'runFix'; fix: FixKind; provider?: string | null }
+  | { type: 'openDiff'; toolId: string }
+  | { type: 'keepEdit'; toolId: string }
+  /** Undo edits newest first; `force` also undoes files changed since the edit. */
+  | { type: 'undoEdits'; toolIds: string[]; force?: boolean }
+  | { type: 'addFolder' };

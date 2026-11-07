@@ -87,7 +87,8 @@ export function Composer({ state, dispatch, onView }: { state: State; dispatch: 
 
   const slashItems = popup?.kind === 'slash' ? commands.filter((c) => c.name.startsWith(popup.query.toLowerCase())) : [];
   const mentionItems = popup?.kind === 'mention' ? state.files.items : [];
-  const itemCount = popup?.kind === 'slash' ? slashItems.length : mentionItems.length;
+  // The last @ entry adds a folder from anywhere on disk (a data folder, another project).
+  const itemCount = popup?.kind === 'slash' ? slashItems.length : mentionItems.length + 1;
 
   function onChange(value: string, caret: number) {
     setText(value);
@@ -114,8 +115,14 @@ export function Composer({ state, dispatch, onView }: { state: State; dispatch: 
       return;
     }
     const item = mentionItems[index];
-    if (!item) return;
-    dispatch({ type: 'local/addChip', chip: { kind: item.kind, path: item.path, label: item.label } });
+    if (!item) {
+      post({ type: 'addFolder' });
+      const caret = ta.current?.selectionStart ?? text.length;
+      setText(text.slice(0, popup.start) + text.slice(caret));
+      setPopup(null);
+      return;
+    }
+    dispatch({ type: 'local/addChip', chip: { kind: item.kind, path: item.path, label: item.label, abs: item.abs } });
     const caret = ta.current?.selectionStart ?? text.length;
     setText(text.slice(0, popup.start) + text.slice(caret));
     setPopup(null);
@@ -148,7 +155,11 @@ export function Composer({ state, dispatch, onView }: { state: State; dispatch: 
                   <Icon name={f.kind === 'folder' ? 'folder' : 'file'} className="dim" />
                   <span className="ellipsis">{f.label}</span><span className="dim ellipsis small">{f.path}</span>
                 </button>
-              ))}
+              )).concat(
+                <button key="__add" role="option" aria-selected={active === mentionItems.length} className={`popup-item ${active === mentionItems.length ? 'active' : ''}`} onMouseEnter={() => setActive(mentionItems.length)} onMouseDown={(e) => { e.preventDefault(); choose(mentionItems.length); }}>
+                  <Icon name="new-folder" className="dim" /><span>Add a folder from disk…</span>
+                </button>,
+              )}
         </div>
       )}
       <div className="input-box">

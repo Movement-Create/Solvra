@@ -7,8 +7,17 @@ is the control channel, the prompt must be passed as an argument (`-` is rejecte
 ```sh
 solvra run "Fix the bug in sample.js" --output-format stream-json \
   --permission-mode default --session <id> --title "Fix sample.js" \
-  --allow-rule edit --allow-rule execute:node
+  --allow-rule edit --allow-rule execute:node \
+  --add-dir /path/to/other/root --checkpoint-dir /path/to/checkpoints
 ```
+
+- `--add-dir` (repeatable) lists more folders in the agent's environment, such as other workspace
+  roots or data folders. The working directory is still the process cwd (or `--cwd`).
+- `--checkpoint-dir`: before a `file_edit` or `file_write` runs, the backend copies the file's
+  original to `<dir>/<tool call id>.orig`. This happens before any approval, so the copy is what
+  the user last saw. `tool_result` then carries `checkpoint: {file, before}`, where `before` is
+  null when the edit created the file. A UI can use it to show a diff and to undo the edit.
+  Changes made by `bash` are not checkpointed.
 
 Plain text output and `--json` output are unchanged. `--output-format json` is the same as `--json`.
 
@@ -20,13 +29,13 @@ interleave.
 
 | type | fields |
 |---|---|
-| `session` | `id` (null with `--ephemeral`), `title`, `model`, `provider`, `cwd`, `mode` (ask, ask-all, plan, auto), `effort`, `resumed`, `rules` |
+| `session` | `id` (null with `--ephemeral`), `title`, `model`, `provider`, `cwd`, `mode` (ask, ask-all, plan, auto), `effort`, `resumed`, `rules`, `additional_dirs` |
 | `text_delta` | `agent`, `text` |
 | `thinking_delta` | `agent`, `text`. Sent when the provider streams reasoning. |
 | `tool_call` | `agent`, `id`, `name`, `input`, `summary` (e.g. "Edit sample.js"), `kind` (read, edit, execute, agent, network) |
 | `permission_request` | `id` (p1, p2, …), `agent`, `tool_call_id`, `tool`, `kind`, `summary`, `diff` (unified diff or null), `command` (or null), `always` (what "don't ask again" would remember, e.g. `edit` or `execute:node`; null when it cannot be offered) |
 | `permission_rule` | `rule`, `kind`, `prefix`. Sent after an `allow_always` answer. Pass the rule back with `--allow-rule` on later runs of the same session. |
-| `tool_result` | `agent`, `id`, `ok`, `output` (capped at 20,000 characters), `diff` (for edits), `meta` `{added, removed, lines}` |
+| `tool_result` | `agent`, `id`, `ok`, `output` (capped at 20,000 characters), `diff` (for edits), `meta` `{added, removed, lines}`, `checkpoint` (`{file, before}` with `--checkpoint-dir`, else null) |
 | `agent_start` | `agent`, `parent`, `tool_call_id`, `title` |
 | `agent_end` | `agent`, `status` (ok, error, cancelled) |
 | `plan` | `agent`, `items` `[{text, status: done, active or pending}]`. Comes from the `todo` tool of the main agent. |

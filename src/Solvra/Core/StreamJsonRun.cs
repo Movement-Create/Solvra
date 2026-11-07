@@ -46,7 +46,13 @@ public sealed class StreamJsonRun : IAgentObserver
 
     private sealed record PendingPermission(TaskCompletionSource<PermissionAnswer> Answer, string ToolCallId, string Kind, string? Prefix);
     public sealed record PermissionAnswer(string Decision, string? Message);
-    private sealed record ToolPreview(string Name, string Summary, string? Diff, int Added, int Removed, string? Command);
+    private sealed record ToolPreview(string Name, string Summary, string? Diff, int Added, int Removed, string? Command)
+    {
+        /// <summary>Absolute path of the file an edit touches, and where its original was saved (null: it did not exist).</summary>
+        public string? File { get; init; }
+        public string? Before { get; init; }
+        public bool Snapshotted { get; init; }
+    }
 
     /// <summary>A remembered "Yes, don't ask again": a whole kind (edit, agent, network, read) or an execute command prefix.</summary>
     public sealed record PermissionRule(string Kind, string? Prefix)
@@ -118,7 +124,7 @@ public sealed class StreamJsonRun : IAgentObserver
 
     private void OnToolCall(string agentId, ToolCall tc)
     {
-        var preview = Preview(tc);
+        var preview = Snapshot(tc, Preview(tc));
         _previews[tc.Id] = preview;
         Emit(new
         {
@@ -140,6 +146,10 @@ public sealed class StreamJsonRun : IAgentObserver
             output = output.Length > 20_000 ? output[..20_000] + "\n…" : output,
             diff = tr.IsError ? null : preview?.Diff,
             meta,
+            // Present when the edit ran and its original was saved: lets a UI show a diff and undo it.
+            checkpoint = !tr.IsError && preview is { Snapshotted: true, File: not null }
+                ? new { file = preview.File, before = preview.Before }
+                : null,
         });
         if (preview?.Name == "todo" && !tr.IsError) EmitPlan(agentId);
     }
@@ -153,6 +163,9 @@ public sealed class StreamJsonRun : IAgentObserver
             .ToList();
         Emit(new { type = "plan", agent = agentId, items });
     }
+
+    /// <summary>When set, the original of every file an edit touches is saved here first (for review and undo).</summary>
+    public string? CheckpointDir { get; init; }
 
     /// <summary>Set by the caller once the session id is known, so plan events can read the todo list.</summary>
     public string? CurrentSessionId { get; set; }
@@ -384,11 +397,43 @@ public sealed class StreamJsonRun : IAgentObserver
             case "web_search": return Simple(tc, $"Search the web for {Short(Get("query"))}");
             case "agent": return Simple(tc, $"Agent: {AgentTool.SubagentTitle(Get("description"), Get("prompt") ?? "")}");
             case "todo": return Simple(tc, "Update plan");
+            case "verify":
+                var passed = tc.Input.TryGetValue("passed", out var pv) && pv.ValueKind == JsonValueKind.True;
+                return Simple(tc, $"Verify {Short(Get("check"))}{(tc.Input.ContainsKey("passed") ? passed ? " (passed)" : " (failed)" : "")}");
+            case "decide": return Simple(tc, $"Decide {Short(Get("question"))}{(Get("choice") is { } choice ? $" → {Short(choice)}" : "")}");
             default:
                 var summary = Observability.Printer.SummarizeInput(tc.Name, JsonSerializer.SerializeToElement(tc.Input));
                 return Simple(tc, $"{tc.Name} {summary}".Trim());
         }
     }
+
+    /// <summary>
+    /// Save the original of the file a file_edit / file_write is about to change. Called before the
+    /// tool runs (and before any approval), so the copy is the state the user last saw.
+    /// </summary>
+    private ToolPreview Snapshot(ToolCall tc, ToolPreview preview)
+    {
+        if (CheckpointDir is null || tc.Name is not ("file_edit" or "file_write")) return preview;
+        if (!tc.Input.TryGetValue("path", out var p) || p.ValueKind != JsonValueKind.String) return preview;
+        try
+        {
+            var full = Path.GetFullPath(p.GetString()!, _cwd);
+            Directory.CreateDirectory(CheckpointDir);
+            string? before = null;
+            if (File.Exists(full))
+            {
+                before = Path.Combine(CheckpointDir, SafeName(tc.Id) + ".orig");
+                File.Copy(full, before, overwrite: true);
+            }
+            return preview with { File = full, Before = before, Snapshotted = true };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return preview;
+        }
+    }
+
+    private static string SafeName(string id) => new(id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
 
     private static ToolPreview Simple(ToolCall tc, string summary) => new(tc.Name, summary, null, 0, 0, null);
 

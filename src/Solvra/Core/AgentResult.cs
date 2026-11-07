@@ -50,6 +50,9 @@ public record AgentRunOptions
     /// <summary>Shared ownership of detached processes created by this run and its subagents.</summary>
     internal RunProcessTracker? ProcessTracker { get; init; }
 
+    /// <summary>More folders the user added (other workspace roots, data folders). Listed in the environment.</summary>
+    public IReadOnlyList<string> AdditionalDirs { get; init; } = [];
+
     /// <summary>Working directory for tools and project instructions (default: process cwd).</summary>
     public string? Cwd { get; init; }
 

@@ -14,15 +14,30 @@ export function chipLabel(c: Chip): string {
   return l ? `${c.path}:${l}` : c.path;
 }
 
-export function buildPrompt(text: string, chips: Chip[]): string {
+/** Path to show the agent: workspace-relative inside the working folder, absolute elsewhere. */
+export function agentPath(c: Chip, cwd?: string): string {
+  if (!c.abs || !cwd) return c.path;
+  const rel = c.abs.startsWith(cwd.endsWith('/') ? cwd : cwd + '/') ? c.abs.slice(cwd.length).replace(/^[\\/]/, '') : null;
+  return rel ?? c.abs;
+}
+
+/** Folders outside the working folder that must be passed as --add-dir. */
+export function extraDirs(chips: Chip[], cwd: string, roots: string[]): string[] {
+  const inside = (p: string, root: string) => p === root || p.startsWith(root.endsWith('/') ? root : root + '/');
+  const dirs = new Set<string>(roots.filter((r) => r !== cwd));
+  for (const c of chips) if (c.kind === 'folder' && c.abs && !inside(c.abs, cwd)) dirs.add(c.abs);
+  return [...dirs];
+}
+
+export function buildPrompt(text: string, chips: Chip[], cwd?: string): string {
   const parts: string[] = [];
-  const files = chips.filter((c) => c.kind === 'file').map((c) => c.path);
-  const folders = chips.filter((c) => c.kind === 'folder').map((c) => c.path);
+  const files = chips.filter((c) => c.kind === 'file').map((c) => agentPath(c, cwd));
+  const folders = chips.filter((c) => c.kind === 'folder').map((c) => agentPath(c, cwd));
   if (files.length) parts.push(`Files the user attached (read them as needed): ${files.join(', ')}`);
   if (folders.length) parts.push(`Folders the user attached (explore them as needed): ${folders.join(', ')}`);
   for (const c of chips.filter((c) => c.kind === 'selection')) {
     const body = (c.text ?? '').length > MAX_SELECTION ? (c.text ?? '').slice(0, MAX_SELECTION) + '\n…(truncated)' : c.text ?? '';
-    parts.push(`<selection path="${c.path}" lines="${lines(c)}">\n${body}\n</selection>`);
+    parts.push(`<selection path="${agentPath(c, cwd)}" lines="${lines(c)}">\n${body}\n</selection>`);
   }
   const msg = text.trim();
   if (msg) parts.push(msg);

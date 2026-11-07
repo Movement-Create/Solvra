@@ -17,6 +17,10 @@ export interface StreamRunOptions {
   sessionId?: string;
   title?: string;
   allowRules?: string[];
+  /** Other folders the agent may use (more workspace roots, @-added folders). */
+  addDirs?: string[];
+  /** Where the backend saves originals before edits (review and undo). */
+  checkpointDir?: string;
 }
 
 /** Command line for a stream-json run. Pure; unit-tested. */
@@ -33,6 +37,8 @@ export function buildStreamArgs(o: Omit<StreamRunOptions, 'dotnet' | 'cwd' | 'en
   if (o.sessionId) args.push('--session', o.sessionId);
   else if (o.title) args.push('--title', o.title);
   for (const rule of o.allowRules ?? []) args.push('--allow-rule', rule);
+  for (const dir of o.addDirs ?? []) args.push('--add-dir', dir);
+  if (o.checkpointDir) args.push('--checkpoint-dir', o.checkpointDir);
   return args;
 }
 
