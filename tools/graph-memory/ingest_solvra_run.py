@@ -24,7 +24,7 @@ from neo4j_agent_memory.core.memory import ToolCallStatus
 
 SOLVRA = Path.home() / ".local/share/solvra"
 MISSING = ["agent_version", "source_revision", "instruction_revision", "system_prompt", "cwd (not in run records; taken from tool_use.input.cwd)",
-           "decision/judgment records (no decide tool)", "evidence record ids on tool outputs", "verification pass/fail + attempt", "outcome/filed artifact", "cost (always 0 for chatgpt provider)"]
+           "decision/judgment records (only when the run used the decide tool)", "evidence record ids on tool outputs", "verification pass/fail + attempt (only when the run used the verify tool)", "outcome/filed artifact (only from a run_end record)", "cost (always 0 for chatgpt provider)"]
 
 def ts(s): 
     s = s.rstrip("Z"); head, _, frac = s.partition("."); 
@@ -72,6 +72,7 @@ async def main():
     sev = [e for e in jl(root / f"sessions/{session_id}.jsonl") if t0 - timedelta(seconds=3) <= ts(e["timestamp"]) <= t1 + timedelta(seconds=2)]
     config = jl(root / f"sessions/{session_id}.jsonl")[0]["data"]["config"]
     user_msgs = [e for e in sev if e["type"] == "user_message"]; finals = [e for e in sev if e["type"] == "assistant_message"]
+    run_end = next((e["data"] for e in sev if e["type"] == "run_end"), None)  # written by telemetry package B; absent in older runs
     if len(user_msgs) != 1: sys.exit(f"expected one user_message in window, found {len(user_msgs)}")
     user_text = text_of(user_msgs[0]["data"]["content"]); final_text = text_of(finals[-1]["data"]["content"]) if finals else None
     turns = [e for e in sev if e["type"] == "assistant_turn"]
@@ -118,8 +119,11 @@ async def main():
                                 id=str(tc.id), cid=b["id"], pos=pos, turn=tool_turn.get(b["id"], ti), span=span["span_id"], t=a.trace_id,
                                 ob=len(out) if out is not None else None, osha=sha(out) if out is not None else None, isha=sha(json.dumps(b["input"], sort_keys=True)),
                                 ad=tool_audit.get(b["id"], {}).get("duration_ms"))
-                if b["name"] == "decide":  # judgment point (tool does not exist yet; kept so the path is exercised when it does)
+                if b["name"] == "decide" and not err:  # judgment point recorded by telemetry package B's decide tool
                     decisions.append((step.id, b["id"], b["input"], out))
+                if b["name"] == "verify" and not err:
+                    async with driver.session() as s:
+                        await s.run("MATCH (tc:ToolCall {id: $id}) SET tc.is_verification=true", id=str(tc.id))
         if finals and len(llm_spans) == len(turns) + 1:  # the answer turn is a model call too; keep its metrics as the last step
             ti = len(turns) + 1; mc = model_calls.get(ti, {}); ms = model_started.get(ti, {}); llm = llm_spans[-1]
             step_ids.append((await rm.add_step(trace.id, thought=None, action="final_answer", observation=None, generate_embedding=False,
@@ -135,7 +139,8 @@ async def main():
                   r.system_prompt=null, r.model=$model, r.provider=$provider, r.cwd=$cwd, r.permission_mode=$pm, r.effort=$effort,
                   r.started_at=datetime($t0), r.ended_at=datetime($t1), r.duration_ms=$dur, r.turns=$turns, r.tool_calls=$ncalls,
                   r.input_tokens=$itok, r.output_tokens=$otok, r.cost_usd=$cost, r.cost_known=false, r.stop_reason=$stop,
-                  r.verification=null, r.outcome_filed=null, r.sources=$sources
+                  r.verification=$verification, r.verification_count=$vcount, r.decisions=$decisions, r.outcome_filed=$artifacts, r.artifact_count=$acount,
+                  r.run_end_present=$run_end_present, r.sources=$sources
                 MERGE (c)-[:HAS_RUN]->(r) MERGE (r)-[:HAS_TRACE]->(rt)
                 WITH r MATCH (u:Message {id: $umid}) MERGE (u)-[:TRIGGERED]->(r)
                 WITH r OPTIONAL MATCH (f:Message {id: $fmid}) FOREACH (_ IN CASE WHEN f IS NULL THEN [] ELSE [1] END | MERGE (r)-[:PRODUCED]->(f))
@@ -143,7 +148,13 @@ async def main():
                 pm=config.get("permission_mode"), effort=config.get("effort"), t0=t0.isoformat(), t1=t1.isoformat(), dur=sess_end["duration_ms"], turns=len(llm_spans), ncalls=len(calls),
                 itok=(cost or {}).get("input_tokens"), otok=(cost or {}).get("output_tokens"), cost=(cost or {}).get("cost_usd"), stop=model_calls.get(len(llm_spans), {}).get("stop_reason"),
                 sources=[f"traces.jsonl trace_id={a.trace_id}", f"sessions/{session_id}.jsonl", "logs/audit-*.jsonl", "sessions/cost-ledger.jsonl"],
-                umid=str(umsg.id), fmid=str(final.id) if final else "")
+                umid=str(umsg.id), fmid=str(final.id) if final else "",
+                verification=json.dumps(run_end["verifications"]) if run_end and run_end.get("verifications") else None,
+                vcount=len(run_end.get("verifications") or []) if run_end else None,
+                decisions=run_end.get("decisions") if run_end else None,
+                artifacts=json.dumps(run_end["artifacts"]) if run_end and run_end.get("artifacts") else None,
+                acount=len(run_end.get("artifacts") or []) if run_end else None,
+                run_end_present=run_end is not None)
             for sid_, cid, inp, out in decisions:
                 await s.run("MATCH (s:ReasoningStep {id: $sid}) CREATE (d:Decision {call_id: $cid, question: $q, answer: $ans, confidence: $conf, raw_input: $raw, raw_output: $out}) MERGE (s)-[:DECIDED]->(d)",
                             sid=str(sid_), cid=cid, q=inp.get("question"), ans=inp.get("choice", inp.get("answer")), conf=inp.get("confidence"), raw=json.dumps(inp), out=out)
