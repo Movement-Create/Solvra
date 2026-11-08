@@ -8,11 +8,16 @@ param(
   [switch]$NoStart
 )
 $ErrorActionPreference = 'Stop'
+if (-not (Test-Path -LiteralPath $ConfigFile -PathType Leaf)) {
+  throw 'Private telemetry setup file not found. Download your device JSON first and pass its full path with -ConfigFile.'
+}
 $configDir = Join-Path $env:USERPROFILE '.solvra'
 New-Item -ItemType Directory -Force $configDir | Out-Null
 # Restrict the credential file to this user and SYSTEM before the backend writes it.
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$acl = Get-Acl $configDir
+# Build only the DACL. Set-Acl copies the full security descriptor and can request
+# SeSecurityPrivilege on an already-protected folder, even without audit changes.
+$acl = New-Object System.Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)
 foreach ($identity in @($sid, 'S-1-5-18')) {
   $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
@@ -20,7 +25,12 @@ foreach ($identity in @($sid, 'S-1-5-18')) {
     'ContainerInherit,ObjectInherit', 'None', 'Allow')
   $acl.AddAccessRule($rule)
 }
-Set-Acl -LiteralPath $configDir -AclObject $acl
+$directory = [System.IO.DirectoryInfo]::new($configDir)
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+  $directory.SetAccessControl($acl)
+} else {
+  [System.IO.FileSystemAclExtensions]::SetAccessControl($directory, $acl)
+}
 & $Dotnet $Dll telemetry configure --file $ConfigFile
 if ($LASTEXITCODE -ne 0) { throw 'Telemetry configuration failed.' }
 $taskName = "Solvra Telemetry $sid"
