@@ -1,3 +1,15 @@
+# Windows native stderr fix 0.4.2 — 2026-11-08
+
+Dedicated worktree windows-native-stderr, base origin/main 7bde624.
+
+- User reached successful backend/VSIX installation, then PS5.1 stopped on normal model status stderr.
+- Capture native output with function-local error preference; evaluate process exit codes explicitly.
+- Optional model test failures warn and continue; telemetry setup completes before reporting Done.
+- Add native stderr regression coverage and a Windows installer flow test with disposable prerequisites.
+- Verification and publication pending. Collector/device configuration unchanged.
+
+---
+
 # Windows installer encoding fix 0.4.1 — 2026-11-08
 
 Task worktree: windows-installer-encoding; branch fix/windows-installer-encoding; base origin/main f69c706.

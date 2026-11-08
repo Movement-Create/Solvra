@@ -25,6 +25,10 @@ try {
     $hostExe = (Get-Process -Id $PID).Path
     & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-install.ps1') (Join-Path $root[0].FullName 'install.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Packaged installer helper checks failed' }
+    if ($PSVersionTable.PSVersion.Major -eq 5) {
+        & $hostExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-install-flow.ps1') (Join-Path $root[0].FullName 'install.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged installer flow checks failed' }
+    }
     Write-Host "BUNDLE-CHECKS-OK PowerShell $($PSVersionTable.PSVersion)"
 } finally {
     Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
