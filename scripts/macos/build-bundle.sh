@@ -45,8 +45,10 @@ echo "$EXT_VERSION-${SHORT_SHA:-local}" > "$STAGE/VERSION"
 cp "$VSIX" "$STAGE/"
 install -m 755 "$HERE/install.sh" "$STAGE/install.sh"
 install -m 755 "$HERE/configure-openai.sh" "$STAGE/configure-openai.sh"
+install -m 755 "$HERE/configure-telemetry.sh" "$STAGE/configure-telemetry.sh"
 install -m 755 "$HERE/configure-codex.sh" "$STAGE/configure-codex.sh"
 install -m 644 "$HERE/vscode-settings.sh" "$STAGE/vscode-settings.sh"
+install -m 644 "$HERE/../../tools/telemetry/README.md" "$STAGE/TELEMETRY.md"
 cat > "$STAGE/README.txt" <<EOF
 Solvra for macOS — extension $EXT_VERSION, backend $BACKEND_VERSION
 

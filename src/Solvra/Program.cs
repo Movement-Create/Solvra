@@ -791,6 +791,7 @@ public static class Program
         });
 
 
+        rootCommand.AddCommand(Solvra.Telemetry.TelemetryCommand.Build());
         rootCommand.AddCommand(runCommand);
         rootCommand.AddCommand(chatCommand);
         rootCommand.AddCommand(modelsCommand);

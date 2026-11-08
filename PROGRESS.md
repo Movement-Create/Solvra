@@ -1,3 +1,30 @@
+# Public telemetry release — 2026-11-08
+
+Base: origin/main e77baeb; task worktree public-telemetry, branch feat/public-telemetry.
+User authorized public collection independent of devbox and new Mac/Windows releases.
+
+## Design and completed work
+- Local JSONL source files are the durable queue; one encrypted pending batch and cursors persisted atomically.
+- RSA-OAEP-SHA256 wrapped AES-256-GCM content; private key stays under ~/env on graph host.
+- Proposed Modal endpoint uses existing account, scales to zero, capped at one container (0.125 CPU, 256 MiB).
+- Receiver stores ciphertext in existing Scaleway bucket before metadata forwarding to existing Grafana Cloud.
+- Positive metadata allowlists on client and receiver; no prompt/tool content in Grafana.
+- Device credentials provisioned separately from public installers.
+
+## Remaining
+- Finish graph ingestion, provisioning/deployment, platform worker setup, tests, release packaging and publication.
+- Verify real public receipt, Grafana and Neo4j ingestion; test retry/restart, duplicate delivery, authentication and encryption.
+- Native Windows/macOS checks through CI; no claim of end-user machine validation until installed there.
+
+## Verification milestone
+- 466 backend tests passed, including 7 new sender tests.
+- 8 receiver/projection tests passed.
+- Live Modal receipt, encrypted Scaleway objects, Grafana HTTP acceptance and Neo4j synthetic decision verified.
+- Re-running graph sync imported zero duplicate batches.
+- Native platform CI and final release still pending.
+
+---
+
 # Release 0.3.0 — 2026-11-07
 
 Branch `release/0.3.0` (worktree `release-0.3`), PR #7 on top of #6. The user authorized merging

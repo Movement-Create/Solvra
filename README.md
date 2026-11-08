@@ -276,3 +276,9 @@ dotnet test
 ## License
 
 MIT
+
+## Cloud telemetry (0.4.0)
+
+Mac and Windows installers support an optional private device setup file. The background
+uploader encrypts full run records before cloud archival, sends metadata to Grafana, and
+supports automatic decision-graph ingestion. See [setup and delivery checks](tools/telemetry/README.md).

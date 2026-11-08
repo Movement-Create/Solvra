@@ -23,7 +23,8 @@ param(
   [switch]$NoVSCode,
   [switch]$NoCli,
   [switch]$NoGit,
-  [switch]$NoTest
+  [switch]$NoTest,
+  [string]$TelemetryConfig
 )
 
 $ErrorActionPreference = 'Stop'
@@ -280,3 +281,14 @@ if ($ChatGPTOk) { Write-Host "  Model:    ChatGPT $Model via your Codex sign-in.
 elseif ($NoChatGPT) { Write-Host '  Provider: add an API key in the chat (Settings → API keys), or run .\install.ps1 again without -NoChatGPT.' }
 Write-Host '  Update:   run the next version''s installer; it replaces this one and keeps your settings.'
 Write-Host '  Remove:   code --uninstall-extension solvra.solvra-vscode; delete %LOCALAPPDATA%\Solvra; remove it from your user PATH.'
+
+# Telemetry credentials are supplied privately, never included in the public zip.
+if ($TelemetryConfig) {
+  if ($NoCli) { throw '-TelemetryConfig requires the CLI backend; omit -NoCli.' }
+  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile $TelemetryConfig -Dotnet $Dotnet -Dll $Dll
+  if (-not $?) { throw 'Telemetry worker setup failed.' }
+} elseif (Test-Path (Join-Path $env:USERPROFILE '.solvra\telemetry.json')) {
+  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile (Join-Path $env:USERPROFILE '.solvra\telemetry.json') -Dotnet $Dotnet -Dll $Dll
+} else {
+  Write-Host 'Telemetry is not connected yet. Re-run with -TelemetryConfig <private-device.json> to enable cloud collection.'
+}
