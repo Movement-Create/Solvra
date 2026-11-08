@@ -36,10 +36,24 @@ function Die([string]$m)  { Write-Host "error: $m" -ForegroundColor Red; throw $
 
 # ------------------------------------------------------------------ helpers (also used by tests)
 
+function Invoke-NativeCapture([string]$FilePath, [string[]]$ArgumentList) {
+  # In Windows PowerShell 5.1, redirected stderr becomes ErrorRecord objects.
+  # Scope Continue to this invocation; process failure is determined by exit code.
+  $ErrorActionPreference = 'Continue'
+  $global:LASTEXITCODE = $null
+  $lines = @(& $FilePath @ArgumentList 2>&1)
+  $code = $global:LASTEXITCODE
+  if ($null -eq $code) { throw "Could not run native command: $FilePath" }
+  [pscustomobject]@{
+    ExitCode = $code
+    Output = (($lines | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine).Trim()
+  }
+}
+
 function Test-Net8([string]$dotnet) {
   if (-not $dotnet -or -not (Test-Path -LiteralPath $dotnet)) { return $false }
-  try { $list = & $dotnet --list-runtimes 2>$null } catch { return $false }
-  return [bool]($list | Where-Object { $_ -match '^Microsoft\.NETCore\.App 8\.' })
+  try { $result = Invoke-NativeCapture $dotnet @('--list-runtimes') } catch { return $false }
+  return ($result.ExitCode -eq 0 -and $result.Output -match '(?m)^Microsoft\.NETCore\.App 8\.')
 }
 
 function Find-Dotnet {
@@ -188,8 +202,9 @@ Copy-Item -LiteralPath $BackendSrc -Destination $Release -Recurse
 if (Test-Path -LiteralPath $Current) { cmd /c rmdir "`"$Current`"" | Out-Null }
 New-Item -ItemType Junction -Path $Current -Target $Release | Out-Null
 
-$BackendVersion = (& $Dotnet $Dll --version 2>&1 | Out-String).Trim()
-if ($LASTEXITCODE -ne 0) { Die "Solvra failed to start: $BackendVersion" }
+$versionResult = Invoke-NativeCapture $Dotnet @($Dll, '--version')
+$BackendVersion = $versionResult.Output
+if ($versionResult.ExitCode -ne 0) { Die "Solvra failed to start (exit $($versionResult.ExitCode)): $BackendVersion" }
 Say "Solvra backend: $BackendVersion"
 
 # ---- Git Bash (Solvra runs commands with bash)
@@ -268,9 +283,25 @@ if (-not $NoVSCode) {
 # ---- one tiny test request
 if ($ChatGPTOk -and -not $NoTest) {
   Say "Testing $Model with a one-line request..."
-  $out = (& $Dotnet $Dll run 'Reply with exactly the word OK and nothing else.' --provider chatgpt --model $Model --no-tools --no-session --ephemeral --max-turns 1 --time-limit-seconds 90 2>&1 | Out-String).Trim()
-  if ($out -match '(?m)^OK$') { Say 'Model answered: OK' }
-  else { Warn "Unexpected test output (Solvra may still work; try it in VS Code):`n$out" }
+  try {
+    $test = Invoke-NativeCapture $Dotnet @($Dll, 'run', 'Reply with exactly the word OK and nothing else.', '--provider', 'chatgpt', '--model', $Model, '--no-tools', '--no-session', '--ephemeral', '--max-turns', '1', '--time-limit-seconds', '90')
+    if ($test.ExitCode -eq 0 -and $test.Output -match '(?m)^OK\r?$') { Say 'Model answered: OK' }
+    else { Warn "Model test did not succeed (exit $($test.ExitCode)); installation will continue. Try Solvra in VS Code:`n$($test.Output)" }
+  } catch {
+    Warn "Model test could not run; installation will continue: $($_.Exception.Message)"
+  }
+}
+
+# Telemetry credentials are supplied privately, never included in the public zip.
+if ($TelemetryConfig) {
+  if ($NoCli) { throw '-TelemetryConfig requires the CLI backend; omit -NoCli.' }
+  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile $TelemetryConfig -Dotnet $Dotnet -Dll $Dll
+  if (-not $?) { throw 'Telemetry worker setup failed.' }
+} elseif (Test-Path (Join-Path $env:USERPROFILE '.solvra\telemetry.json')) {
+  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile (Join-Path $env:USERPROFILE '.solvra\telemetry.json') -Dotnet $Dotnet -Dll $Dll
+  if (-not $?) { throw 'Telemetry worker setup failed.' }
+} else {
+  Write-Host 'Telemetry is not connected yet. Re-run with -TelemetryConfig <private-device.json> to enable cloud collection.'
 }
 
 Write-Host ''
@@ -281,14 +312,3 @@ if ($ChatGPTOk) { Write-Host "  Model:    ChatGPT $Model via your Codex sign-in.
 elseif ($NoChatGPT) { Write-Host '  Provider: add an API key in the chat (Settings -> API keys), or run .\install.ps1 again without -NoChatGPT.' }
 Write-Host '  Update:   run the next version''s installer; it replaces this one and keeps your settings.'
 Write-Host '  Remove:   code --uninstall-extension solvra.solvra-vscode; delete %LOCALAPPDATA%\Solvra; remove it from your user PATH.'
-
-# Telemetry credentials are supplied privately, never included in the public zip.
-if ($TelemetryConfig) {
-  if ($NoCli) { throw '-TelemetryConfig requires the CLI backend; omit -NoCli.' }
-  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile $TelemetryConfig -Dotnet $Dotnet -Dll $Dll
-  if (-not $?) { throw 'Telemetry worker setup failed.' }
-} elseif (Test-Path (Join-Path $env:USERPROFILE '.solvra\telemetry.json')) {
-  & (Join-Path $PSScriptRoot 'configure-telemetry.ps1') -ConfigFile (Join-Path $env:USERPROFILE '.solvra\telemetry.json') -Dotnet $Dotnet -Dll $Dll
-} else {
-  Write-Host 'Telemetry is not connected yet. Re-run with -TelemetryConfig <private-device.json> to enable cloud collection.'
-}

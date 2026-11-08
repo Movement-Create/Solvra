@@ -3,6 +3,15 @@ $errors = $null
 [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$errors) | Out-Null
 if ($errors.Count) { $errors | ForEach-Object { Write-Host "PARSE: $($_.Message) line $($_.Extent.StartLineNumber)" }; exit 1 }
 . $args[0]  # helpers only (the installer stops when dot-sourced)
+$hostExe = (Get-Process -Id $PID).Path
+foreach ($code in @(0, 17)) {
+  $result = Invoke-NativeCapture $hostExe @('-NoProfile', '-Command', "[Console]::Error.WriteLine('[session] Starting agent session'); [Console]::Out.WriteLine('OK'); exit $code")
+  if ($result.ExitCode -ne $code -or $result.Output -notmatch '(?m)^OK\r?$' -or $result.Output -notmatch '\[session\] Starting agent session') {
+    throw "Native stdout/stderr or exit code was lost: $($result | ConvertTo-Json)"
+  }
+  if ($ErrorActionPreference -ne 'Stop') { throw 'Native capture changed the caller error preference' }
+}
+Write-Host 'NATIVE-STDERR-CHECKS-OK'
 $w = Get-WrapperText 'C:\dn\dotnet.exe' 'C:\S\current\Solvra.dll' 'chatgpt' 'chatgpt:gpt-5.6-sol' 'C:\npm\codex.cmd'
 if ($w -notmatch 'if not defined SOLVRA_PROVIDER set "SOLVRA_PROVIDER=chatgpt"' -or $w -notmatch '"C:\\dn\\dotnet.exe" "C:\\S\\current\\Solvra.dll" %\*') { Write-Host "wrapper bad:`n$w"; exit 1 }
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "svps-settings-$PID.json"
@@ -21,3 +30,4 @@ if (-not (Update-VSCodeSettings $new @{ 'solvra.model' = 'chatgpt:x' })) { Write
 Write-Host "new file: $((Get-Content $new -Raw) -replace '\s+',' ')"
 Remove-Item $tmp, "$tmp.solvra-backup" -ErrorAction SilentlyContinue
 Write-Host 'PS-CHECKS-OK'
+exit 0

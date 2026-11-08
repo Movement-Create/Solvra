@@ -1,3 +1,20 @@
+# Windows native stderr fix 0.4.2 — 2026-11-08
+
+Dedicated worktree windows-native-stderr, base origin/main 7bde624.
+
+- User reached successful backend/VSIX installation, then PS5.1 stopped on normal model status stderr.
+- Capture native output with function-local error preference; evaluate process exit codes explicitly.
+- Optional model test failures warn and continue; telemetry setup completes before reporting Done.
+- Add native stderr regression coverage and a Windows installer flow test with disposable prerequisites.
+- Verified release source 85ab1b5: PS5.1.26100.33648 packaged flow success/model-failure/NoTest/backend-failure all pass, native stderr tests pass on PS5.1 and PS7.
+- CI 42469309182 and PR CI 42469334904 pass. Seven telemetry tests per OS, ten receiver tests, native worker registration and live public delivery pass on Windows/Mac/Linux.
+- First Linux live-delivery attempt returned IOException; rerunning that failed job succeeded. No source or collector changes were needed for the retry.
+- Packaged checksums and device-credential scan passed on 551 artifact members. Assets rebuilt with source revision 85ab1b5 for release v0.4.2 (Windows ZIP, Mac archive, VSIX, SHA256SUMS).
+- The install-flow test uses disposable native prerequisites and a telemetry boundary marker; actual worker registration/cloud delivery are verified separately. Interactive dependency installation and provider sign-in were not repeated on the user's computer.
+- Existing 0.4.1 workaround: rerun install.ps1 -NoTest with the private telemetry file. Collector/device configuration unchanged.
+
+---
+
 # Windows installer encoding fix 0.4.1 — 2026-11-08
 
 Task worktree: windows-installer-encoding; branch fix/windows-installer-encoding; base origin/main f69c706.
