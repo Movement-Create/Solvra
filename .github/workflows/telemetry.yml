@@ -1,13 +1,29 @@
 name: Telemetry and installers
 on:
   push:
-    branches: [feat/public-telemetry, main]
+    branches: [feat/public-telemetry, fix/windows-installer-encoding, main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  windows-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: scripts/build-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/solvra-windows-*.zip
   client:
+    needs: windows-bundle
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +36,17 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet test tests/Solvra.Tests --filter FullyQualifiedName~TelemetryTests --nologo
       - run: dotnet run --project src/Solvra -- telemetry --help
+      - uses: actions/download-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: windows-installer
+          path: dist
+      - name: Packaged installer on Windows PowerShell 5.1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1' }
+          ./scripts/windows/test-bundle.ps1 (Get-ChildItem dist/solvra-windows-*.zip).FullName
       - name: Windows installer helpers
         if: runner.os == 'Windows'
         shell: pwsh

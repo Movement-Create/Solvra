@@ -10,7 +10,9 @@ $dotnet=(Get-Command dotnet).Source
 $dll=(Resolve-Path 'src/Solvra/bin/Debug/net8.0/Solvra.dll').Path
 if ($IsWindows) {
   try {
-    ./scripts/windows/configure-telemetry.ps1 -ConfigFile $config -Dotnet $dotnet -Dll $dll -NoStart
+    # Match the Windows installer's host, even though key generation above requires PS7.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows/configure-telemetry.ps1 -ConfigFile $config -Dotnet $dotnet -Dll $dll -NoStart
+    if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell telemetry configuration failed' }
     $name='Solvra Telemetry '+[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $task=Get-ScheduledTask -TaskName $name
     if ($task.Actions.Execute -ne $dotnet -or $task.Actions.Arguments -notmatch 'telemetry watch') { throw 'Invalid task action' }

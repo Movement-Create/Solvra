@@ -22,7 +22,10 @@ with zipfile.ZipFile(vsix) as z:
 if "backend/Solvra.dll" not in files: sys.exit("VSIX has no extension/backend/Solvra.dll")
 files[os.path.basename(vsix)] = open(vsix, "rb").read()
 for f in ("install.ps1", "Install Solvra.cmd", "configure-telemetry.ps1"):
-    files[f] = open(os.path.join(here, f), "rb").read()
+    data = open(os.path.join(here, f), "rb").read()
+    # Windows PowerShell 5.1 otherwise treats UTF-8 scripts as the ANSI code page.
+    # Decode first to reject invalid source encoding, and emit exactly one BOM.
+    files[f] = data.decode("utf-8-sig").encode("utf-8-sig") if f.endswith(".ps1") else data
 files["TELEMETRY.md"] = open(os.path.join(here, "../../tools/telemetry/README.md"), "rb").read()
 files["VERSION"] = (version + "\r\n").encode()
 files["README.txt"] = f"""Solvra {version} for Windows 10/11
