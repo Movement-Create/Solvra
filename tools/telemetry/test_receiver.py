@@ -80,3 +80,34 @@ def test_encryption_graph_projection_and_otlp_ids():
     assert len(span['traceId'])==32
     assert span['spanId']=='c'*16
     assert 'private-question' not in json.dumps(signals(b))
+
+
+def test_historical_metadata_uses_receipt_time_without_losing_event_time():
+    b=Batch.model_validate(batch())
+    log=signals(b)['logs']['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]
+    assert int(log['timeUnixNano']) > 1_700_000_000_000_000_000
+    attrs={v['key']:v['value'] for v in log['attributes']}
+    assert attrs['solvra.event_time_unix_ms']=={'intValue':'100'}
+
+
+def test_private_enrollment_requires_owner_and_never_serves_archive_key(tmp_path,monkeypatch):
+    import enrollment, threading, time
+    from http.server import HTTPServer
+    import httpx
+    monkeypatch.setattr(enrollment,'ROOT',tmp_path)
+    (tmp_path/'enrollment.json').write_text(json.dumps({'login':'owner@example.test','expires':time.time()+60}))
+    (tmp_path/'mac.json').write_text('{"example":"private-setup"}')
+    (tmp_path/'archive-private.pem').write_text('must-never-be-served')
+    server=HTTPServer(('127.0.0.1',0),enrollment.Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{server.server_port}') as c:
+            assert c.get('/mac.json').status_code==403
+            assert c.get('/mac.json',headers={'Tailscale-User-Login':'someone-else@example.test'}).status_code==403
+            headers={'Tailscale-User-Login':'owner@example.test'}
+            assert c.get('/mac.json',headers=headers).status_code==200
+            assert c.get('/archive-private.pem',headers=headers).status_code==404
+            assert c.get('/../archive-private.pem',headers=headers).status_code==404
+            (tmp_path/'enrollment.json').write_text(json.dumps({'login':'owner@example.test','expires':0}))
+            assert c.get('/mac.json',headers=headers).status_code==403
+    finally: server.shutdown();server.server_close();thread.join()

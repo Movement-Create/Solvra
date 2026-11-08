@@ -85,8 +85,9 @@ python tools/telemetry/smoke.py --dll path/to/Solvra.dll
 python tools/telemetry/graph_sync.py
 ```
 
-For revocation, remove the device hash from the receiver's deployed secret and redeploy. To rotate
-an existing device token, change it in its private config, redeploy, and import the replacement
+For revocation, replace that device's token in its private config with a newly generated random
+value and redeploy; keep the replacement private. Other devices are unaffected. To rotate a
+device while keeping it active, also import the replacement
 config on that computer. Preserve its `device_id`, public key and local state. For an additional
 computer, issue a new UUID/token and add its hash to deployment. Do not reuse the mac/windows
 files across multiple installations. Archive key rotation requires keeping old keys; unsupported
@@ -96,3 +97,8 @@ The graph timer is installed from `install-graph-worker.sh` into an immutable ve
 independent of the task worktree. Inspect `journalctl --user -u solvra-telemetry-graph.service`.
 Tests: `dotnet test ... --filter FullyQualifiedName~TelemetryTests`, `pytest tools/telemetry`;
 GitHub Actions runs the client on Linux, macOS and Windows and checks native worker definitions.
+
+`install-enrollment.sh` optionally exposes only mac.json/windows.json to the owning Tailscale
+login over HTTPS for seven days. The archive private key is never served. This is setup-only;
+public telemetry ingestion does not use that service. Stop its systemd unit and remove Serve
+port 9597 when setup is complete. Re-run to renew the seven-day download window.

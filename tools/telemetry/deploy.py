@@ -33,7 +33,7 @@ def main():
     key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
     public = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
     configs = {}
-    for name in ('mac', 'windows', 'smoke'):
+    for name in ('mac', 'windows', 'smoke', 'ci'):
         path = ROOT / (name + '.json')
         config = json.loads(path.read_text()) if path.exists() else {
             'endpoint': 'https://not-configured.invalid', 'device_id': uuid.uuid4().hex,

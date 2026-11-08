@@ -28,6 +28,25 @@ jobs:
         if: runner.os != 'Linux'
         shell: pwsh
         run: ./scripts/test-telemetry-worker.ps1
+      - name: Public collector delivery (no Tailscale)
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          DEVICE_SETUP: ${{ secrets.SOLVRA_TELEMETRY_SMOKE_CONFIG }}
+        run: |
+          if (-not $env:DEVICE_SETUP) { throw 'Live telemetry test credential is missing.' }
+          $dir = Join-Path $env:RUNNER_TEMP ('solvra-live-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory $dir | Out-Null
+          $config = $env:DEVICE_SETUP | ConvertFrom-Json
+          $config | Add-Member -Force NoteProperty logs_directory (Join-Path $dir 'logs')
+          $config | Add-Member -Force NoteProperty sessions_directory (Join-Path $dir 'sessions')
+          $env:SOLVRA_TELEMETRY_CONFIG = Join-Path $dir 'device.json'
+          [IO.File]::WriteAllText($env:SOLVRA_TELEMETRY_CONFIG, ($config | ConvertTo-Json))
+          Remove-Item Env:DEVICE_SETUP
+          dotnet src/Solvra/bin/Debug/net8.0/Solvra.dll telemetry test
+          if ($LASTEXITCODE -ne 0) { throw 'Public cloud delivery failed.' }
+          dotnet src/Solvra/bin/Debug/net8.0/Solvra.dll telemetry status
+          Remove-Item -Recurse $dir
   receiver:
     runs-on: ubuntu-latest
     steps:

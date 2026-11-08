@@ -9,7 +9,7 @@ if [ ! -d "$DEST" ]; then
   mkdir -p "$DEST"
   cp "$HERE"/*.py "$HERE/requirements.txt" "$DEST/"
 fi
-uv venv "$DEST/venv"
+[ -x "$DEST/venv/bin/python" ] || uv venv "$DEST/venv"
 uv pip install --python "$DEST/venv/bin/python" -r "$DEST/requirements.txt"
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/solvra-telemetry-graph.service" <<UNIT
