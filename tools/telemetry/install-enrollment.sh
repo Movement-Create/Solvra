@@ -28,4 +28,4 @@ UNIT
 systemctl --user daemon-reload
 systemctl --user enable --now solvra-telemetry-enrollment.service
 # Do not reset or replace unrelated Serve routes.
-tailscale serve --bg --https=9597 http://127.0.0.1:8349
+sudo -n tailscale serve --bg --https=9597 http://127.0.0.1:8349

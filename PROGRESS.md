@@ -1,27 +1,34 @@
-# Public telemetry release — 2026-11-08
+# Public telemetry 0.4.0 — 2026-11-08
 
-Base: origin/main e77baeb; task worktree public-telemetry, branch feat/public-telemetry.
-User authorized public collection independent of devbox and new Mac/Windows releases.
+Base: origin/main e77baeb; task worktree public-telemetry, branch feat/public-telemetry, PR #11.
+User authorized public collection independent of devbox and Mac/Windows release publication.
 
-## Design and completed work
-- Local JSONL source files are the durable queue; one encrypted pending batch and cursors persisted atomically.
-- RSA-OAEP-SHA256 wrapped AES-256-GCM content; private key stays under ~/env on graph host.
-- Proposed Modal endpoint uses existing account, scales to zero, capped at one container (0.125 CPU, 256 MiB).
-- Receiver stores ciphertext in existing Scaleway bucket before metadata forwarding to existing Grafana Cloud.
-- Positive metadata allowlists on client and receiver; no prompt/tool content in Grafana.
-- Device credentials provisioned separately from public installers.
+## Implemented and deployed
+- Durable uploader with atomic pending batch/cursors and per-user background workers on both platforms.
+- Full JSONL records encrypted on the device (RSA-OAEP-SHA256 + AES-256-GCM); private key stays under ~/env.
+- Public Modal receiver live: https://lookingto3--solvra-telemetry-web.us-east.modal.run
+- Ciphertext in existing Scaleway bucket; allowlisted metadata logs/traces forwarded to Grafana Cloud.
+- Automatic graph timer imports immutable archived batches transactionally into Neo4j, including decisions/evidence links.
+- Private per-device setup files served only to the owning Tailscale login on port 9597, expiring after seven days.
+- Private key and device configs backed up through existing encrypted devbox-lake secrets backup.
+- Public artifacts contain no device credentials. Source main checkout unchanged.
 
-## Remaining
-- Finish graph ingestion, provisioning/deployment, platform worker setup, tests, release packaging and publication.
-- Verify real public receipt, Grafana and Neo4j ingestion; test retry/restart, duplicate delivery, authentication and encryption.
-- Native Windows/macOS checks through CI; no claim of end-user machine validation until installed there.
+## Verification
+- 466 backend tests, including 7 new sender tests; 27 extension tests; 10 Python receiver/enrollment/projection tests passed.
+- GitHub run 42460532364 passed on Linux, Windows and macOS, including real public upload from every runner without Tailscale.
+- CI's three synthetic decisions automatically reached Neo4j through the graph timer.
+- Live archive decryption, graph replay deduplication, authentication rejection and historical backfill verified.
+- Native Windows scheduled-task registration and macOS LaunchAgent definition validation passed.
+- Private setup downloads verified over Tailscale; unauthorized requests rejected; archive key cannot be served.
+- Staged changes scanned with gitleaks: no leaks. Release packaging produces Mac tar.gz, Windows zip, VSIX and checksums.
 
-## Verification milestone
-- 466 backend tests passed, including 7 new sender tests.
-- 8 receiver/projection tests passed.
-- Live Modal receipt, encrypted Scaleway objects, Grafana HTTP acceptance and Neo4j synthetic decision verified.
-- Re-running graph sync imported zero duplicate batches.
-- Native platform CI and final release still pending.
+## Operational limits
+- User must import the private device file; workers run while signed in. Retain local source files until delivery.
+- Graph processing/viewing remains on devbox and catches up after downtime; public receipt does not depend on it.
+- Grafana ingestion acknowledgments verified. Saved dashboard service-account credential returned 401, so dashboard readback was unavailable.
+- Delivery is at least once; identifiers permit log deduplication. Single records over 8 MiB pause upload rather than lose content.
+- Ephemeral runs have no session transcript; only recorded decisions can appear in the graph.
+- No check has run on the user's own computers yet; native CI and actual public delivery were tested.
 
 ---
 
