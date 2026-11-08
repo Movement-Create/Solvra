@@ -5,7 +5,12 @@ Task worktree: windows-installer-encoding; branch fix/windows-installer-encoding
 - User hit a parser failure in Windows PowerShell 5.1: UTF-8 without BOM was decoded as ANSI.
 - Installer messages now use ASCII; packaged PowerShell scripts explicitly include a UTF-8 BOM.
 - CI builds the actual bundle and tests it using Windows PowerShell 5.1, matching the double-click launcher.
-- Local source helper checks and release build passed; native Windows PowerShell 5.1 CI and publication pending.
+- Source dcee5a1: release packages rebuilt with matching embedded revision; internal checksums and 551-member device credential scan pass.
+- GitHub runs 42468187045 and 42468202699 pass. Packaged scripts parsed and helper checks ran under Windows PowerShell 5.1.26100.33648; native worker registration succeeded using powershell.exe.
+- Seven telemetry tests pass on each OS, ten receiver tests pass, and real public uploads pass from Windows/macOS/Linux.
+- Original ANSI decoding reproduces six parser errors; fixed source yields zero. Regression guard rejects ZIPs with stripped BOMs.
+- Release assets: solvra-windows-0.4.1.zip, solvra-macos-0.4.1.tar.gz, solvra-vscode-0.4.1.vsix, SHA256SUMS. Publication location: https://github.com/Movement-Create/Solvra/releases/tag/v0.4.1
+- Native checks cover parsing, installer helpers and telemetry registration; interactive prerequisite downloads/ChatGPT sign-in were not repeated on the user's PC.
 - Telemetry worker registration now also executes through Windows PowerShell 5.1 in CI.
 - No changes to collector settings or device credentials.
 
