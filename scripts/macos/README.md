@@ -69,3 +69,13 @@ refreshing the login is left to `codex app-server`. The script writes `SOLVRA_PR
 the model and `SOLVRA_CODEX_BIN` to `~/.config/solvra/env.sh`, points VS Code at the wrapper,
 and sends a one-line test request. Both configure scripts update VS Code settings through the
 shared `vscode-settings.sh`; running either one switches the provider.
+
+## Cloud telemetry
+
+Obtain your private per-device setup file separately, then run:
+
+```
+./install.sh --telemetry-config "$HOME/Downloads/mac.json"
+```
+
+Check `solvra telemetry status` for confirmed receipt. See [telemetry setup](../../tools/telemetry/README.md) for details.

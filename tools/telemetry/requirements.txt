@@ -1,0 +1,6 @@
+boto3==1.38.46
+cryptography==46.0.3
+fastapi==0.115.12
+httpx==0.28.1
+neo4j==5.28.2
+pytest==8.4.2

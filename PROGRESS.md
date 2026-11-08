@@ -1,3 +1,37 @@
+# Public telemetry 0.4.0 — 2026-11-08
+
+Base: origin/main e77baeb; task worktree public-telemetry, branch feat/public-telemetry, PR #11.
+User authorized public collection independent of devbox and Mac/Windows release publication.
+
+## Implemented and deployed
+- Durable uploader with atomic pending batch/cursors and per-user background workers on both platforms.
+- Full JSONL records encrypted on the device (RSA-OAEP-SHA256 + AES-256-GCM); private key stays under ~/env.
+- Public Modal receiver live: https://lookingto3--solvra-telemetry-web.us-east.modal.run
+- Ciphertext in existing Scaleway bucket; allowlisted metadata logs/traces forwarded to Grafana Cloud.
+- Automatic graph timer imports immutable archived batches transactionally into Neo4j, including decisions/evidence links.
+- Private per-device setup files served only to the owning Tailscale login on port 9597, expiring after seven days.
+- Private key and device configs backed up through existing encrypted devbox-lake secrets backup.
+- Public artifacts contain no device credentials. Source main checkout unchanged.
+
+## Verification
+- 466 backend tests, including 7 new sender tests; 27 extension tests; 10 Python receiver/enrollment/projection tests passed.
+- GitHub run 42460532364 passed on Linux, Windows and macOS, including real public upload from every runner without Tailscale.
+- CI's three synthetic decisions automatically reached Neo4j through the graph timer.
+- Live archive decryption, graph replay deduplication, authentication rejection and historical backfill verified.
+- Native Windows scheduled-task registration and macOS LaunchAgent definition validation passed.
+- Private setup downloads verified over Tailscale; unauthorized requests rejected; archive key cannot be served.
+- Staged changes scanned with gitleaks: no leaks. Release packaging produces Mac tar.gz, Windows zip, VSIX and checksums.
+
+## Operational limits
+- User must import the private device file; workers run while signed in. Retain local source files until delivery.
+- Graph processing/viewing remains on devbox and catches up after downtime; public receipt does not depend on it.
+- Grafana ingestion acknowledgments verified. Saved dashboard service-account credential returned 401, so dashboard readback was unavailable.
+- Delivery is at least once; identifiers permit log deduplication. Single records over 8 MiB pause upload rather than lose content.
+- Ephemeral runs have no session transcript; only recorded decisions can appear in the graph.
+- No check has run on the user's own computers yet; native CI and actual public delivery were tested.
+
+---
+
 # Release 0.3.0 — 2026-11-07
 
 Branch `release/0.3.0` (worktree `release-0.3`), PR #7 on top of #6. The user authorized merging

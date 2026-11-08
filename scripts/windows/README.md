@@ -28,3 +28,13 @@ Updating: run the newer zip's installer; it replaces the release and keeps setti
 
 `pwsh scripts/windows/test-install.ps1 scripts/windows/install.ps1` checks the installer's
 helpers (wrapper text and settings merge) on any OS.
+
+## Cloud telemetry
+
+Obtain your private per-device setup file separately, then run:
+
+```
+.\install.ps1 -TelemetryConfig "$env:USERPROFILE\Downloads\windows.json"
+```
+
+Check `solvra telemetry status` for confirmed receipt. See [telemetry setup](../../tools/telemetry/README.md) for details.

@@ -45,3 +45,9 @@ vscode-extension/webview-ui/harness/out/
 .DS_Store
 Thumbs.db
 dist/
+
+## Python tooling
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/

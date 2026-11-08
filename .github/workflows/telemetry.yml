@@ -1,0 +1,58 @@
+name: Telemetry and installers
+on:
+  push:
+    branches: [feat/public-telemetry, main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet test tests/Solvra.Tests --filter FullyQualifiedName~TelemetryTests --nologo
+      - run: dotnet run --project src/Solvra -- telemetry --help
+      - name: Windows installer helpers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows/test-install.ps1 ./scripts/windows/install.ps1
+      - name: Native worker definition
+        if: runner.os != 'Linux'
+        shell: pwsh
+        run: ./scripts/test-telemetry-worker.ps1
+      - name: Public collector delivery (no Tailscale)
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        env:
+          DEVICE_SETUP: ${{ secrets.SOLVRA_TELEMETRY_SMOKE_CONFIG }}
+        run: |
+          if (-not $env:DEVICE_SETUP) { throw 'Live telemetry test credential is missing.' }
+          $dir = Join-Path $env:RUNNER_TEMP ('solvra-live-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory $dir | Out-Null
+          $config = $env:DEVICE_SETUP | ConvertFrom-Json
+          $config | Add-Member -Force NoteProperty logs_directory (Join-Path $dir 'logs')
+          $config | Add-Member -Force NoteProperty sessions_directory (Join-Path $dir 'sessions')
+          $env:SOLVRA_TELEMETRY_CONFIG = Join-Path $dir 'device.json'
+          [IO.File]::WriteAllText($env:SOLVRA_TELEMETRY_CONFIG, ($config | ConvertTo-Json))
+          Remove-Item Env:DEVICE_SETUP
+          dotnet src/Solvra/bin/Debug/net8.0/Solvra.dll telemetry test
+          if ($LASTEXITCODE -ne 0) { throw 'Public cloud delivery failed.' }
+          dotnet src/Solvra/bin/Debug/net8.0/Solvra.dll telemetry status
+          Remove-Item -Recurse $dir
+  receiver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r tools/telemetry/requirements.txt
+      - run: pytest tools/telemetry -q

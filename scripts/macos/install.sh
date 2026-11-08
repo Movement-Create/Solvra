@@ -24,6 +24,7 @@ INSTALL_VSCODE=1
 ALLOW_DOTNET_DOWNLOAD=1
 SETUP_CHATGPT=1
 MODEL="gpt-5.6-sol"
+TELEMETRY_CONFIG=""
 MARKER="# >>> solvra installer >>>"
 MARKER_END="# <<< solvra installer <<<"
 
@@ -31,6 +32,7 @@ usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --telemetry-config) shift; TELEMETRY_CONFIG="${1:?--telemetry-config needs a private setup file}" ;;
     --no-cli) INSTALL_CLI=0 ;;
     --no-vscode) INSTALL_VSCODE=0 ;;
     --no-dotnet) ALLOW_DOTNET_DOWNLOAD=0 ;;
@@ -219,4 +221,15 @@ if [ "$CHATGPT_OK" = "1" ]; then
 elif [ "$SETUP_CHATGPT" = "0" ]; then
   echo "  Provider: run ./configure-codex.sh (ChatGPT, no API key) or ./configure-openai.sh (API key),"
   echo "            or add a key in the chat: Settings → API keys."
+fi
+
+# Keep the worker pointing at the current backend on upgrades. Never bundle credentials.
+if [ -z "$TELEMETRY_CONFIG" ] && [ -f "$HOME/.solvra/telemetry.json" ]; then
+  TELEMETRY_CONFIG="$HOME/.solvra/telemetry.json"
+fi
+if [ -n "$TELEMETRY_CONFIG" ]; then
+  [ "$INSTALL_CLI" = "1" ] || die "--telemetry-config requires the CLI backend; omit --no-cli."
+  "$BUNDLE_DIR/configure-telemetry.sh" "$TELEMETRY_CONFIG" "$DOTNET" "$OPT/current/Solvra.dll"
+else
+  echo 'Telemetry is not connected yet. Re-run with --telemetry-config <private-device.json> to enable cloud collection.'
 fi
