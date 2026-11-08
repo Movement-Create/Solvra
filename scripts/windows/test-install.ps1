@@ -1,4 +1,4 @@
-# Checks for install.ps1 helpers; runs anywhere PowerShell 7 runs:  pwsh scripts/windows/test-install.ps1 scripts/windows/install.ps1
+# Checks for install.ps1 helpers; supports Windows PowerShell 5.1 and PowerShell 7:  pwsh scripts/windows/test-install.ps1 scripts/windows/install.ps1
 $errors = $null
 [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$errors) | Out-Null
 if ($errors.Count) { $errors | ForEach-Object { Write-Host "PARSE: $($_.Message) line $($_.Extent.StartLineNumber)" }; exit 1 }

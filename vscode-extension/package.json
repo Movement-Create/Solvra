@@ -2,7 +2,7 @@
   "name": "solvra-vscode",
   "displayName": "Solvra",
   "description": "AI agent orchestrator for VS Code — chat, run prompts, explain and fix code (C#/.NET backend)",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "solvra",
   "engines": {
     "vscode": "^1.85.0"

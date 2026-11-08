@@ -133,7 +133,7 @@ function Update-VSCodeSettings([string]$path, [hashtable]$values) {
 function Invoke-Winget([string]$id, [string]$what) {
   $winget = Get-Command winget -ErrorAction SilentlyContinue
   if (-not $winget) { Warn "winget is not available, so $what cannot be installed automatically."; return $false }
-  Say "Installing $what with winget ($id)…"
+  Say "Installing $what with winget ($id)..."
   & $winget.Source install --id $id -e --silent --accept-source-agreements --accept-package-agreements | Out-Host
   return ($LASTEXITCODE -eq 0)
 }
@@ -167,7 +167,7 @@ Get-ChildItem -LiteralPath $Bundle -Recurse -File | Unblock-File -ErrorAction Si
 # ---- .NET 8 runtime
 $Dotnet = Find-Dotnet
 if (-not $Dotnet) {
-  Say '.NET 8 runtime not found; installing it for your user with Microsoft''s dotnet-install.ps1…'
+  Say '.NET 8 runtime not found; installing it for your user with Microsoft''s dotnet-install.ps1...'
   $tmp = Join-Path ([IO.Path]::GetTempPath()) "dotnet-install-$([Guid]::NewGuid().ToString('N')).ps1"
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   Invoke-WebRequest -UseBasicParsing -Uri 'https://dot.net/v1/dotnet-install.ps1' -OutFile $tmp
@@ -205,7 +205,7 @@ else { Warn 'No Git Bash: Solvra can read and edit files, but running commands w
 $Codex = $null
 $ChatGPTOk = $false
 if (-not $NoChatGPT) {
-  Say 'Setting up ChatGPT through your Codex sign-in (no API key needed)…'
+  Say 'Setting up ChatGPT through your Codex sign-in (no API key needed)...'
   $Codex = Find-Codex
   if (-not $Codex) {
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -213,7 +213,7 @@ if (-not $NoChatGPT) {
       if (Invoke-Winget 'OpenJS.NodeJS.LTS' 'Node.js LTS') { Update-SessionPath }
     }
     if (Get-Command npm -ErrorAction SilentlyContinue) {
-      Say 'Installing the Codex CLI (npm install -g @openai/codex)…'
+      Say 'Installing the Codex CLI (npm install -g @openai/codex)...'
       & npm install -g @openai/codex | Out-Host
       $Codex = Find-Codex
     }
@@ -225,7 +225,7 @@ if (-not $NoChatGPT) {
     $codexHome = $env:CODEX_HOME
     if (-not $codexHome) { $codexHome = Join-Path $env:USERPROFILE '.codex' }
     if (-not (Test-Path (Join-Path $codexHome 'auth.json'))) {
-      Say 'Signing in to ChatGPT with Codex (your browser will open)…'
+      Say 'Signing in to ChatGPT with Codex (your browser will open)...'
       & $Codex login | Out-Host
     }
     if (Test-Path (Join-Path $codexHome 'auth.json')) { $ChatGPTOk = $true; Say 'Codex sign-in found.' }
@@ -248,7 +248,7 @@ if (-not $NoVSCode) {
   $Code = Find-Code
   if (-not $Vsix) { Warn 'No solvra-vscode-*.vsix in this folder; skipping VS Code.' }
   elseif (-not $Code) {
-    Warn "VS Code not found. Install it from https://code.visualstudio.com, then run this installer again (or install $($Vsix.Name) from the Extensions view: … → Install from VSIX)."
+    Warn "VS Code not found. Install it from https://code.visualstudio.com, then run this installer again (or install $($Vsix.Name) from the Extensions view: ... -> Install from VSIX)."
   } else {
     Say "Installing the VS Code extension $($Vsix.Name)"
     & $Code --install-extension $Vsix.FullName --force | Out-Host
@@ -267,7 +267,7 @@ if (-not $NoVSCode) {
 
 # ---- one tiny test request
 if ($ChatGPTOk -and -not $NoTest) {
-  Say "Testing $Model with a one-line request…"
+  Say "Testing $Model with a one-line request..."
   $out = (& $Dotnet $Dll run 'Reply with exactly the word OK and nothing else.' --provider chatgpt --model $Model --no-tools --no-session --ephemeral --max-turns 1 --time-limit-seconds 90 2>&1 | Out-String).Trim()
   if ($out -match '(?m)^OK$') { Say 'Model answered: OK' }
   else { Warn "Unexpected test output (Solvra may still work; try it in VS Code):`n$out" }
@@ -278,7 +278,7 @@ Say 'Done.'
 if (-not $NoCli) { Write-Host '  Command:  open a new terminal, then: solvra chat' }
 if ($VSCodeOk) { Write-Host '  VS Code:  close and reopen VS Code, open a folder, then click the Solvra icon in the Activity Bar.' }
 if ($ChatGPTOk) { Write-Host "  Model:    ChatGPT $Model via your Codex sign-in. Change it from the model menu in the chat." }
-elseif ($NoChatGPT) { Write-Host '  Provider: add an API key in the chat (Settings → API keys), or run .\install.ps1 again without -NoChatGPT.' }
+elseif ($NoChatGPT) { Write-Host '  Provider: add an API key in the chat (Settings -> API keys), or run .\install.ps1 again without -NoChatGPT.' }
 Write-Host '  Update:   run the next version''s installer; it replaces this one and keeps your settings.'
 Write-Host '  Remove:   code --uninstall-extension solvra.solvra-vscode; delete %LOCALAPPDATA%\Solvra; remove it from your user PATH.'
 

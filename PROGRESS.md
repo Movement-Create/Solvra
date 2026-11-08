@@ -1,3 +1,16 @@
+# Windows installer encoding fix 0.4.1 — 2026-11-08
+
+Task worktree: windows-installer-encoding; branch fix/windows-installer-encoding; base origin/main f69c706.
+
+- User hit a parser failure in Windows PowerShell 5.1: UTF-8 without BOM was decoded as ANSI.
+- Installer messages now use ASCII; packaged PowerShell scripts explicitly include a UTF-8 BOM.
+- CI builds the actual bundle and tests it using Windows PowerShell 5.1, matching the double-click launcher.
+- Local source helper checks and release build passed; native Windows PowerShell 5.1 CI and publication pending.
+- Telemetry worker registration now also executes through Windows PowerShell 5.1 in CI.
+- No changes to collector settings or device credentials.
+
+---
+
 # Public telemetry 0.4.0 — 2026-11-08
 
 Base: origin/main e77baeb; task worktree public-telemetry, branch feat/public-telemetry, PR #11.
