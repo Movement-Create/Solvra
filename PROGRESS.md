@@ -1,3 +1,15 @@
+# Windows telemetry ACL fix 0.4.3 — 2026-11-08
+
+Dedicated worktree windows-telemetry-acl, base origin/main e679fce.
+
+- User hit SeSecurityPrivilege when reapplying Set-Acl to the already-protected .solvra directory.
+- Replace full-descriptor Set-Acl with a fresh DACL applied directly through .NET; preserve owner/audit settings and grant only current user/SYSTEM.
+- Reject a missing private enrollment file before changing filesystem permissions.
+- Native Windows regression removes security/backup/restore/take-ownership privileges, applies setup twice, checks exact directory/file grants and unchanged owner.
+- Validation/publication pending. Plan a small standalone helper so installed 0.4.2 can finish setup without reinstalling.
+
+---
+
 # Windows native stderr fix 0.4.2 — 2026-11-08
 
 Dedicated worktree windows-native-stderr, base origin/main 7bde624.
